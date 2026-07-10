@@ -1024,7 +1024,7 @@ function renderDeliveryDetails(em){
   const open = drawerDeliveryOpen.has(em.id);
   const s = deliverySummary(em);
   const chev = LU('<path d="m6 9 6 6 6-6"/>');
-  const summaryText = `Sent to ${s.delivered} of ${s.total}${s.bounced?` · <span class="dr-bounce-count">${s.bounced} bounced</span>`:""}`;
+  const summaryText = `Delivered to ${s.delivered} of ${s.total}${s.bounced?` · <span class="dr-bounce-count">${s.bounced} bounced</span>`:""}`;
   if(!open){
     return `<div class="delivery-block">
       <button class="dr-toggle" data-delivery-toggle="${em.id}">

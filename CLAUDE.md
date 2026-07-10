@@ -90,7 +90,7 @@ The `▾` chevron next to recipient names is the only clickable element in an em
 
 An **expanded message shows the sender's raw email** next to their name, Gmail-style (`Dana Reed <finance@meridiangroup.com>`, muted `.td-who-email`) — from only, not to/cc (those already show truncated + the full detail is one chevron-click away via the header modal above). **Attachment chips are clickable** (`data-open-attachment`, `openMockAttachment()`) — there's no real file behind them, so clicking opens a new tab with a plain "preview unavailable in this prototype" placeholder rather than doing nothing, so the chip doesn't read as a dead decoration.
 
-The per-recipient delivery summary line reads **"Sent to X of Y"**, not "Delivered to X of Y" — `s.delivered` in `deliverySummary()` is really a not-bounced count, and "Sent" is the more accurate claim for that count; the per-recipient row's own "Delivered" line (with a timestamp) is unaffected, that one really is describing a delivery receipt.
+The delivery summary line reads **"Delivered to X of Y"** — tried "Sent to X of Y" briefly (`s.delivered` in `deliverySummary()` is really a not-bounced count, so "Sent" was arguably more accurate), reverted back per feedback.
 
 ### 4. Email thread drawer is resizable
 
