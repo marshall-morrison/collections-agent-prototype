@@ -42,6 +42,17 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function mdToHtml(t){ return t.trim().split(/\n\n+/).map(p=>`<p>${p.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,' ')}</p>`).join(''); }
 function mdInline(t){ return t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>'); }
+// Four copies of the same NAV_ICON.agent glyph pointing outward from a shared center —
+// the "agent identity" mark for the worklist's status line (see .agent-voice below).
+function agentClusterIcon(){
+  const path = '<path fill="currentColor" d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/>';
+  return `<span class="av-icon">
+    <svg class="av-star av-n" viewBox="0 0 24 24">${path}</svg>
+    <svg class="av-star av-e" viewBox="0 0 24 24">${path}</svg>
+    <svg class="av-star av-s" viewBox="0 0 24 24">${path}</svg>
+    <svg class="av-star av-w" viewBox="0 0 24 24">${path}</svg>
+  </span>`;
+}
 // Recommendation → Why → Evidence: leads with the call to action, then the reasoning behind
 // it, then the source facts — a "powerful TL;DR" meant to build trust in the agent's judgment
 // rather than making the user re-derive it from a wall of narrative text.
@@ -827,6 +838,7 @@ function inboxCell(key, r){
 }
 
 function renderInbox(){
+  const needsReviewCount = WORKLIST.filter(r=>r.planStatus==="review").length;
   const cols = INBOX_COLUMNS.filter(c=>c.pinned || visibleInboxCols.has(c.key));
   const q = inboxSearchQuery.trim().toLowerCase();
   const searched = q ? WORKLIST.filter(r=>r.customer.toLowerCase().includes(q)) : WORKLIST;
@@ -890,6 +902,12 @@ function renderInbox(){
     <div class="inbox-wrap">
       <div class="inbox-head">
         <h1>Collections Agent</h1>
+      </div>
+      <div class="agent-voice">
+        ${agentClusterIcon()}
+        <span class="av-text">${needsReviewCount>0
+          ? `I have <strong>${needsReviewCount}</strong> action${needsReviewCount===1?"":"s"} ready for your review`
+          : `Nothing needs your review right now`}</span>
       </div>
       <div class="filter-row">
         <div style="position:relative;display:inline-block">

@@ -233,8 +233,22 @@
 
   /* ===== INBOX VIEW ===== */
   .inbox-wrap{padding:24px 28px;}
-  .inbox-head{display:flex;align-items:center;gap:10px;margin-bottom:20px;}
+  .inbox-head{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
   .inbox-head h1{margin:0;}
+  /* Agent identity line — a quiet first-person status, not a stat card. The four small
+     marks pointing outward from a shared center are the same NAV_ICON.agent glyph used
+     in the left rail and chat header, just clustered; each pulses in place on a stagger
+     so it reads as "working through several things," not a spinner. */
+  .agent-voice{display:flex;align-items:center;gap:10px;margin:0 0 18px;font-size:13.5px;color:var(--ink);}
+  .av-icon{position:relative;width:22px;height:22px;flex:0 0 22px;color:var(--hi-200);}
+  .av-star{width:11px;height:11px;position:absolute;top:50%;left:50%;margin:-5.5px 0 0 -5.5px;}
+  .av-n{translate:0 -6px;animation:avPulse 2.4s ease-in-out infinite;}
+  .av-e{translate:6px 0;rotate:90deg;animation:avPulse 2.4s ease-in-out .15s infinite;}
+  .av-s{translate:0 6px;rotate:180deg;animation:avPulse 2.4s ease-in-out .3s infinite;}
+  .av-w{translate:-6px 0;rotate:270deg;animation:avPulse 2.4s ease-in-out .45s infinite;}
+  @keyframes avPulse{0%,100%{scale:1;opacity:.8;}50%{scale:1.2;opacity:1;}}
+  @media (prefers-reduced-motion:reduce){.av-star{animation:none !important;}}
+  .agent-voice strong{font-family:"Geist Mono",ui-monospace,SFMono-Regular,monospace;color:var(--hi-200);font-weight:700;}
   .filter-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;}
   .filter-row .sp{flex:1;}
   /* search — collapsed by default, expands on focus so you can type longer queries */
