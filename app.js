@@ -42,20 +42,6 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function mdToHtml(t){ return t.trim().split(/\n\n+/).map(p=>`<p>${p.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,' ')}</p>`).join(''); }
 function mdInline(t){ return t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>'); }
-// Four copies of the same NAV_ICON.agent glyph pointing outward from a shared center —
-// the "agent identity" mark for the worklist's status line (see .agent-voice below).
-function agentClusterIcon(extraClass){
-  const path = '<path fill="currentColor" d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/>';
-  return `<span class="av-icon${extraClass?` ${extraClass}`:""}">
-    <svg class="av-star av-n" viewBox="0 0 24 24">${path}</svg>
-    <svg class="av-star av-e" viewBox="0 0 24 24">${path}</svg>
-    <svg class="av-star av-s" viewBox="0 0 24 24">${path}</svg>
-    <svg class="av-star av-w" viewBox="0 0 24 24">${path}</svg>
-  </span>`;
-}
-// Recommendation → Why → Evidence: leads with the call to action, then the reasoning behind
-// it, then the source facts — a "powerful TL;DR" meant to build trust in the agent's judgment
-// rather than making the user re-derive it from a wall of narrative text.
 // Flat bullets, not broken-out sections: 3-4 lines that give a reviewer just enough to click
 // Approve without digging further — what was asked, the state of the invoice, and why
 // approving is safe (no dispute, nothing outside what was requested).
@@ -63,7 +49,6 @@ function renderAgentSummary(s){
   const items = s.agentSummary.map(b=>`<li>${mdInline(b)}</li>`).join("");
   return `<ul class="as-bullets">${items}</ul>`;
 }
-function initials(n){ return n.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase(); }
 function entityClass(e){ return {customer:"customer",system:"system",dunning:"system",agent:"agent",merchant:"merchant"}[e]||"system"; }
 function entityLabel(ec, override){ return override || {customer:"Customer",system:"System",dunning:"Dunning",agent:"Agent",merchant:"Merchant"}[ec]||"System"; }
 // Engagement badge — same visual system as the drawer delivery report: positive states
@@ -196,7 +181,7 @@ const INBOX_COLUMNS = [
   { key:"overdue", label:"Total overdue", sortable:true, align:"r", pinned:true },
   { key:"outstanding", label:"Total outstanding", sortable:true, align:"r" },
   { key:"oldestOverdue", label:"Oldest overdue", sortable:true, align:"r" },
-  { key:"invoices", label:"Open invoices" },
+  { key:"invoices", label:"Open invoices", align:"r" },
 ];
 
 // Worklist "Add filter" definitions — each maps to a predicate over a row. "Flag" (formerly
@@ -311,15 +296,11 @@ const SCENARIO_MERIDIAN = {
     { type:"email", id:"e3b" },
   ],
 
-  // "causes" is always an array — even a single-cause action — so downstream code (grouping,
-  // hover highlighting) doesn't need to branch on shape. Update contact cites only Dana's first
-  // email (the contact ask); the reply cites BOTH, since it answers the contact ask AND the
-  // W-9 ask from her second email. See decision on multi-event citation in CLAUDE.md.
   proposed: [
     { kind:"update_contacts", desc:"Update primary billing contact → ap@meridiangroup.com", editableContact:"ap@meridiangroup.com",
-      causes:[{ type:"email", id:"e3a" }] },
+      cause:{ type:"email", id:"e3a" } },
     { kind:"send_email", desc:"Reply to Dana Reed with signed W-9 attached, confirm billing contact update", invoice:"INV-2241",
-      causes:[{ type:"email", id:"e3a" }, { type:"email", id:"e3b" }],
+      cause:{ type:"email", id:"e3b" },
       attachments:[{name:"W-9_GeneralCatalyst.pdf"}],
       draft:{ to:"finance@meridiangroup.com", cc:"ap@meridiangroup.com", subject:"Re: INV-2241: W-9 + billing contact",
         body:"Hi Dana,\n\nThanks for flagging both. The signed W-9 is attached, and I've also updated the billing contact to ap@meridiangroup.com as requested.\n\nLet me know if anything else is needed.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
@@ -458,9 +439,9 @@ const SCENARIO_NORTHWIND = {
   ],
   proposed: [
     { kind:"update_contacts", desc:"Update primary billing contact → ap@northwindtraders.com", editableContact:"ap@northwindtraders.com",
-      causes:[{ type:"email", id:"nw_e2" }] },
+      cause:{ type:"email", id:"nw_e2" } },
     { kind:"send_email", desc:"Reply to Tom Reilly with resent INV-3102, confirm billing contact update", invoice:"INV-3102",
-      causes:[{ type:"email", id:"nw_e2" }],
+      cause:{ type:"email", id:"nw_e2" },
       attachments:[{name:"INV-3102.pdf"}],
       draft:{ to:"finance@northwindtraders.com", cc:"ap@northwindtraders.com", subject:"Re: INV-3102: billing contact + resend",
         body:"Hi Tom,\n\nHappy to help. I've updated the billing contact to ap@northwindtraders.com, and a fresh copy of INV-3102 is attached as well.\n\nLet me know if there's anything else you need.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
@@ -505,10 +486,6 @@ let editingCard = null;
 let editValues = {};
 let expandedCard = null;
 let threadExpanded = false;
-// AI draft refinement (Gmail-style "describe your change")
-let draftHistory = {};   // actionIdx -> [previous body strings]  (undo stack)
-let draftRedo = {};      // actionIdx -> [body strings]           (redo stack)
-let aiGenerating = false;
 // activity state
 let selectedEmailId = null;
 let threadOpenEmails = new Set();
@@ -781,7 +758,7 @@ function inboxCell(key, r){
       return `<td style="white-space:nowrap">${flagIcon}<span class="cust-name">${esc(r.customer)}</span>${pausedBadge}</td>`;
     }
     case "invoices":
-      return `<td>${r.invoices.map(i=>`<span class="inv-tag">${esc(i)}</span>`).join("")}</td>`;
+      return `<td class="r"><span class="cell-amt">${r.invoices.length}</span></td>`;
     case "outstanding":
       return `<td class="r"><span class="cell-amt">${fmtMoney(r.outstandingAmt||r.overdueAmt)}</span></td>`;
     case "overdue":
@@ -789,12 +766,12 @@ function inboxCell(key, r){
     case "oldestOverdue":
       return `<td class="r">${r.mostOverdueDays!=null ? `<span class="cell-amt">${r.mostOverdueDays}d</span>` : `<span style="color:var(--helper)">—</span>`}</td>`;
     case "event":
-      return `<td style="font-size:12.5px;color:var(--helper);width:240px;min-width:200px;line-height:1.45">${esc(r.eventSummary)}</td>`;
+      return `<td style="font-size:12.5px;color:var(--helper);width:240px;min-width:200px;line-height:1.45"><span class="event-text">${esc(r.eventSummary)}</span></td>`;
     case "actions": {
       const actLine = r.proposedActions.length
-        ? `<ul class="act-bullets">${r.proposedActions.map(a=>`<li>${esc(a)}</li>`).join("")}</ul>`
+        ? `<ul class="act-bullets">${r.proposedActions.slice(0,2).map(a=>`<li>${esc(a)}</li>`).join("")}</ul>`
         : `<span style="color:var(--helper)">—</span>`;
-      return `<td>${actLine}</td>`;
+      return `<td style="width:230px;min-width:210px">${actLine}</td>`;
     }
     case "status":
       return `<td><span class="plan-chip ${r.planStatus}">${statusLabel[r.planStatus]||r.planStatus}</span></td>`;
@@ -803,7 +780,6 @@ function inboxCell(key, r){
 }
 
 function renderInbox(){
-  const needsReviewCount = WORKLIST.filter(r=>r.planStatus==="review").length;
   const cols = INBOX_COLUMNS.filter(c=>c.pinned || visibleInboxCols.has(c.key));
   const q = inboxSearchQuery.trim().toLowerCase();
   const searched = q ? WORKLIST.filter(r=>r.customer.toLowerCase().includes(q)) : WORKLIST;
@@ -867,12 +843,6 @@ function renderInbox(){
     <div class="inbox-wrap">
       <div class="inbox-head">
         <h1>Collections Agent</h1>
-      </div>
-      <div class="agent-voice">
-        ${agentClusterIcon()}
-        <span class="av-text">${needsReviewCount>0
-          ? `<strong>${needsReviewCount}</strong> action${needsReviewCount===1?"":"s"} ready for your review`
-          : `Nothing needs your review right now`}</span>
       </div>
       <div class="filter-row">
         <div style="position:relative;display:inline-block">
@@ -955,12 +925,9 @@ function openDraftEditorInDrawer(actionIdx){
   expandedCard = null;
   drawerEditActionIdx = actionIdx;
   let threadId = (THREADS[0] && THREADS[0].id) || "t1", focus = null;
-  // When an action cites more than one event, its most immediate/recent cause is last in the
-  // array — that's the one to jump to (see primaryCause() below).
-  const primary = a && primaryCause(a);
-  if(primary && primary.type==="email"){
-    const t = THREADS.find(t=>t.emails.some(e=>e.id===primary.id));
-    if(t){ threadId = t.id; focus = primary.id; }
+  if(a && a.cause && a.cause.type==="email"){
+    const t = THREADS.find(t=>t.emails.some(e=>e.id===a.cause.id));
+    if(t){ threadId = t.id; focus = a.cause.id; }
   }
   openThreadDrawer(threadId, focus, true);
   // Deep-link straight into the draft input, not just the thread — no hunting for it.
@@ -1069,13 +1036,10 @@ function renderEmailDrawer(){
 
   const msgs = sorted.map(em=>{
     const open = drawerOpenEmails.has(em.id);
-    const ec = entityClass(em.entity);
     const badges = (em.badges||[]).map(b=>engBadge(b)).join("");
-    const avatar = `<span class="td-avatar ${ec}">${esc(initials(em.from.name))}</span>`;
     if(!open){
       const preview = em.body.replace(/\s+/g," ").trim();
       return `<div class="td-msg collapsed" data-drawer-expand="${em.id}">
-        ${avatar}
         <span class="td-who">${esc(em.from.name)}</span>
         <span class="td-pre">${esc(preview)}</span>
         <span class="td-date">${esc(em.date)}</span>
@@ -1084,7 +1048,6 @@ function renderEmailDrawer(){
     const atts = (em.attachments||[]).map(att=>`<span class="attach-chip" data-open-attachment="${esc(att.name)}">📎 ${esc(att.name)}</span>`).join("");
     return `<div class="td-msg open">
       <div class="td-msg-head" data-drawer-expand="${em.id}">
-        ${avatar}
         <div class="td-msg-meta">
           <div class="td-msg-line1"><span class="td-who">${esc(em.from.name)} <span class="td-who-email">&lt;${esc(em.from.email)}&gt;</span></span><span class="td-date">${esc(em.date)} · ${esc(em.time||"")}</span></div>
           <div class="td-msg-to">to ${em.to.map(t=>esc(t.name)).join(", ")}${(em.cc||[]).length?`, +${em.cc.length} cc`:""}</div>
@@ -1107,7 +1070,7 @@ function renderEmailDrawer(){
       // editable composer, inline — same component + state as the Actions-tab card
       draft = `<div class="td-connector"></div>
         <div class="td-draft editing">
-          <div class="td-draft-head"><span class="td-avatar agent">${initials("Collections Agent")}</span><span class="td-draft-name">Collections Agent</span><span class="td-draft-tag">Editing draft reply</span></div>
+          <div class="td-draft-head"><span class="td-draft-name">Collections Agent</span><span class="td-draft-tag">Editing draft reply</span></div>
           ${renderDraftEditor(editAction.draft, editIdx, {inDrawer:true})}
         </div>`;
     } else {
@@ -1115,7 +1078,7 @@ function renderEmailDrawer(){
       const foot = draftDone ? "" : `<div class="td-draft-foot"><button class="btn btn-tertiary" data-drawer-edit>Edit</button><button class="btn btn-primary" data-drawer-send><span class="ic">${ICON.check}</span>Approve &amp; send</button></div>`;
       draft = `<div class="td-connector"></div>
         <div class="td-draft">
-          <div class="td-draft-head"><span class="td-avatar agent">${initials("Collections Agent")}</span><span class="td-draft-name">Collections Agent</span><span class="td-draft-tag">Draft reply</span>${doneTag}</div>
+          <div class="td-draft-head"><span class="td-draft-name">Collections Agent</span><span class="td-draft-tag">Draft reply</span>${doneTag}</div>
           <div class="td-draft-body">${esc(editAction&&editAction.draft?editAction.draft.body:thread.agentReplyDraft)}</div>
           ${foot}
         </div>`;
@@ -1148,12 +1111,6 @@ function wireDrawerComposer(drawer, idx){
   drawer.querySelectorAll("[data-save-draft]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); drawerEditing=false; rr(); });
   drawer.querySelectorAll("[data-app]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); actionState[+el.dataset.app]="approved"; expandedCard=null; closeEmailDrawer(); activeTab="actions"; render(); });
   drawer.querySelectorAll("[data-rej]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); actionState[+el.dataset.rej]="rejected"; expandedCard=null; closeEmailDrawer(); activeTab="actions"; render(); });
-  drawer.querySelectorAll("[data-ai-refine]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const [i,type]=el.dataset.aiRefine.split(":"); const inp=drawer.querySelector(`[data-ai-input="${i}"]`); if(inp) inp.value=""; aiRefineDraft(i, type); });
-  drawer.querySelectorAll("[data-ai-input]").forEach(el=>el.onkeydown=(e)=>{ if(e.key==="Enter"){ e.preventDefault(); e.stopPropagation(); if(!el.value.trim()) return; const i=el.dataset.aiInput; el.value=""; aiRefineDraft(i, null); } });
-  drawer.querySelectorAll("[data-ai-submit]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const i=el.dataset.aiSubmit; const inp=drawer.querySelector(`[data-ai-input="${i}"]`); if(!inp||!inp.value.trim()) return; inp.value=""; aiRefineDraft(i, null); });
-  drawer.querySelectorAll("[data-ai-focus]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); drawer.querySelector(`[data-ai-input="${el.dataset.aiFocus}"]`)?.focus(); });
-  drawer.querySelectorAll("[data-ai-undo]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); aiUndoRedo(el.dataset.aiUndo, false); });
-  drawer.querySelectorAll("[data-ai-redo]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); aiUndoRedo(el.dataset.aiRedo, true); });
   drawer.querySelectorAll("[data-pill-input]").forEach(el=>el.onkeydown=(e)=>{
     if(e.key===" "||e.key===","||e.key==="Enter"){ e.preventDefault();
       const val=el.value.trim().replace(/,$/,""); if(!val) return;
@@ -1401,43 +1358,13 @@ function renderDraftEditor(draft, actionIdx, opts){
     : `<button class="btn btn-danger" data-rej="${actionIdx}"><span class="ic">${ICON.x}</span>Reject</button>
        <button class="btn btn-primary" data-app="${actionIdx}"><span class="ic">${ICON.check}</span>Approve &amp; send</button>`;
 
-  const tool = (p)=>`<button class="cmp-tool" tabindex="-1">${LU(p)}</button>`;
-  const toolbar = [
-    '<path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/>',
-    '<line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/>',
-    '<path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" x2="20" y1="12" y2="12"/>',
-    '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
-    '<line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/>',
-  ].map(tool).join("");
-
-  // Gmail-style AI refinement bar: describe-a-change input + quick refine tools + undo/redo
-  const aiTool = (action,tip,paths)=>`<button class="cmp-ai-tool" data-ai-refine="${actionIdx}:${action}" data-tip="${tip}">${LU(paths)}</button>`;
-  const histLen = (draftHistory[actionIdx]||[]).length;
-  const redoLen = (draftRedo[actionIdx]||[]).length;
-  const aiBar = `<div class="cmp-ai" data-ai-bar="${actionIdx}">
-    <span class="cmp-ai-pencil" data-ai-focus="${actionIdx}">${LU('<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>')}</span>
-    <input class="cmp-ai-input" placeholder="Describe your change" data-ai-input="${actionIdx}">
-    <button class="cmp-ai-submit" data-ai-submit="${actionIdx}" data-tip="Submit" aria-label="Submit change">${LU('<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>')}</button>
-    <div class="cmp-ai-actions">
-      ${aiTool("polish","Polish",'<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>')}
-      ${aiTool("serious","Serious",'<circle cx="12" cy="12" r="10"/><line x1="8" x2="16" y1="15" y2="15"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>')}
-      ${aiTool("friendly","Friendly",'<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>')}
-      ${aiTool("shorter","Shorter",'<path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/>')}
-      <span class="cmp-ai-div"></span>
-      <button class="cmp-ai-tool" data-ai-undo="${actionIdx}" data-tip="Undo" ${histLen?"":"disabled"}>${LU('<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>')}</button>
-      <button class="cmp-ai-tool" data-ai-redo="${actionIdx}" data-tip="Redo" ${redoLen?"":"disabled"}>${LU('<path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"/>')}</button>
-    </div>
-  </div>`;
-
   return `<div class="composer">
     ${threadLink}
     <div class="cmp-field"><span class="cmp-label">To</span><div class="cmp-control">${pillsHtml(pills.to,"to")}</div></div>
     <div class="cmp-field"><span class="cmp-label">Cc</span><div class="cmp-control">${pillsHtml(pills.cc,"cc")}</div></div>
     <div class="cmp-field"><span class="cmp-label">Subject</span><div class="cmp-control"><input class="${subjectClass}" value="${esc(draft.subject||"")}" ${subjectTitle}${isThread?" readonly":""}></div></div>
     <div class="cmp-editor">
-      <div class="cmp-toolbar">${toolbar}</div>
       <textarea class="cmp-body">${esc(draft.body||"")}</textarea>
-      ${aiBar}
     </div>
     <div class="cmp-tiny">
       <button class="btn btn-tertiary" data-cancel-draft="${actionIdx}">Cancel</button>
@@ -1450,74 +1377,6 @@ function renderDraftEditor(draft, actionIdx, opts){
     </div>
     <div class="draft-footer">${footer}</div>
   </div>`;
-}
-
-// ----- AI draft refinement (mock) -----
-// Canned rewrites for the Meridian W-9 reply; a custom instruction falls back to "polish".
-const AI_VARIANTS = {
-  polish:    "Hi Dana,\n\nThanks for flagging both. The signed W-9 is attached, and I've updated the primary billing contact to ap@meridiangroup.com as requested.\n\nPlease let me know if anything else is needed.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
-  serious:   "Dana,\n\nBefore we can move forward, we need the signed W-9 and confirmation of the billing contact. This has already delayed payment, so please send both today.\n\nThank you,\nPriya Sharma\nGeneral Catalyst",
-  friendly:  "Hi Dana,\n\nThanks so much for flagging these! I've attached the signed W-9 for you, and I've gone ahead and updated your billing contact to ap@meridiangroup.com.\n\nJust give me a shout if there's anything else at all I can help with; I'm happy to sort it out.\n\nWarmly,\nPriya",
-  shorter:   "Hi Dana,\n\nSigned W-9 attached, and I've updated the billing contact to ap@meridiangroup.com.\n\nBest,\nPriya",
-};
-function mockRefine(current, type){
-  return (type && AI_VARIANTS[type]) ? AI_VARIANTS[type] : AI_VARIANTS.polish;
-}
-function setDraftBody(actionIdx, body){
-  const a = SCENARIO.proposed[actionIdx];
-  if(a && a.draft) a.draft.body = body;
-}
-function updateAiHistoryButtons(actionIdx){
-  const u = document.querySelector(`[data-ai-undo="${actionIdx}"]`);
-  const r = document.querySelector(`[data-ai-redo="${actionIdx}"]`);
-  if(u) u.disabled = !((draftHistory[actionIdx]||[]).length);
-  if(r) r.disabled = !((draftRedo[actionIdx]||[]).length);
-}
-function typeInto(ta, text, done){
-  ta.value = "";
-  let i = 0;
-  const step = ()=>{
-    if(i >= text.length){ done && done(); return; }
-    i += 2 + Math.floor(Math.random()*3);    // 2–4 chars per tick
-    ta.value = text.slice(0, i);
-    ta.scrollTop = ta.scrollHeight;
-    setTimeout(step, 13);
-  };
-  step();
-}
-function aiRefineDraft(actionIdx, type){
-  if(aiGenerating) return;
-  const ta = document.querySelector(".cmp-body"); if(!ta) return;
-  const editor = document.querySelector(".cmp-editor");
-  const bar = document.querySelector(".cmp-ai");
-  const current = ta.value;
-  const next = mockRefine(current, type);
-  (draftHistory[actionIdx] = draftHistory[actionIdx]||[]).push(current);
-  draftRedo[actionIdx] = [];
-  aiGenerating = true;
-  ta.readOnly = true;
-  editor && editor.classList.add("generating");
-  bar && bar.classList.add("busy");
-  typeInto(ta, next, ()=>{
-    aiGenerating = false;
-    ta.readOnly = false;
-    editor && editor.classList.remove("generating");
-    bar && bar.classList.remove("busy");
-    setDraftBody(actionIdx, next);
-    updateAiHistoryButtons(actionIdx);
-  });
-}
-function aiUndoRedo(actionIdx, isRedo){
-  if(aiGenerating) return;
-  const from = isRedo ? draftRedo[actionIdx] : draftHistory[actionIdx];
-  if(!from || !from.length) return;
-  const ta = document.querySelector(".cmp-body"); if(!ta) return;
-  const to = isRedo ? (draftHistory[actionIdx]=draftHistory[actionIdx]||[]) : (draftRedo[actionIdx]=draftRedo[actionIdx]||[]);
-  to.push(ta.value);
-  const val = from.pop();
-  ta.value = val;
-  setDraftBody(actionIdx, val);
-  updateAiHistoryButtons(actionIdx);
 }
 
 // ============================================================
@@ -1556,7 +1415,7 @@ function renderDetailHeader(){
     <section class="finger">
       <div class="left">
         <div class="agent-summary">
-          <div class="as-label">${agentClusterIcon("static")}Agent Summary</div>
+          <div class="as-label">Agent Summary</div>
           <div class="as-body">${renderAgentSummary(SCENARIO)}</div>
         </div>
       </div>
@@ -1572,7 +1431,7 @@ function renderDetailHeader(){
       </div>
     </section>
     <nav class="tabs">
-      <button class="tab ${activeTab==="actions"?"active":""}" data-tab="actions">Actions${pendingCount>0?agentClusterIcon("tiny"):""}</button>
+      <button class="tab ${activeTab==="actions"?"active":""}" data-tab="actions">Actions${pendingCount>0?`<span class="tab-dot"></span>`:""}</button>
       <button class="tab ${activeTab==="activity"?"active":""}" data-tab="activity">Activity</button>
       <button class="tab ${activeTab==="scheduled"?"active":""}" data-tab="scheduled">Scheduled</button>
       <span class="tab-underline" aria-hidden="true"></span>
@@ -1659,14 +1518,7 @@ function renderActionCard(a, i){
   </div>`;
 }
 
-// An action can cite more than one triggering event — "causes" is always an array, even for a
-// single-cause action. Its *primary* cause (last in the array — the most immediate trigger) is
-// what it nests under in the timeline; any earlier causes are still cited and highlight on
-// hover, just without a static elbow line drawn all the way to them (see wireTimelineHover()).
-function causeKey(c){ return c ? `${c.type}:${c.id}` : ""; }
-function primaryCause(a){ const cs=a.causes||[]; return cs.length ? cs[cs.length-1] : null; }
-
-// One timeline node: an inline "what happened" event, with its nested action(s) beneath.
+// One timeline node: an inline "what happened" event, with its suggested action nested beneath.
 function renderTimelineNode(o){
   const mail = LU('<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>');
   const alert = LU('<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>');
@@ -1696,44 +1548,13 @@ function renderTimelineNode(o){
   } else {
     eventHtml = `<div class="tl-event"><span class="tl-ev-text">Agent-initiated</span></div>`;
   }
-  // o.actions is a list of {action, idx} whose *primary* cause is this event — stacked together
-  // under the one event instead of repeating the event once per action. data-cites carries
-  // EVERY cause the action has (not just this primary one), for hover highlighting.
-  const actionHtml = (o.actions||[]).map(({action,idx})=>
-    `<div class="tl-action" data-action-idx="${idx}" data-cites="${(action.causes||[]).map(causeKey).join(",")}">${renderActionCard(action,idx)}</div>`
-  ).join("");
-  return `<div class="tl-node" data-event-key="${causeKey(o.cause)}">
+  // o.actions is a list of {action, idx} sharing this exact cause — stacked together under
+  // the one event instead of repeating the event once per action.
+  const actionHtml = (o.actions||[]).map(({action,idx})=>`<div class="tl-action">${renderActionCard(action,idx)}</div>`).join("");
+  return `<div class="tl-node">
     <span class="tl-dot ${dotCls}"></span>
     <div class="tl-node-main">${eventHtml}${actionHtml}</div>
   </div>`;
-}
-
-// Hover an action → highlight every event it cites (blue) and darken the rail segments that
-// connect them, even when a cited event isn't the action's immediate parent node (e.g. Meridian's
-// reply cites both Dana's contact-update email AND her follow-up W-9 email).
-function wireTimelineHover(p){
-  const nodes = Array.from(p.querySelectorAll(".tl-node"));
-  p.querySelectorAll(".tl-action[data-cites]").forEach(el=>{
-    const keys = el.dataset.cites.split(",").filter(Boolean);
-    if(!keys.length) return;
-    const ownIdx = nodes.indexOf(el.closest(".tl-node"));
-    el.addEventListener("mouseenter", ()=>{
-      let minIdx = ownIdx;
-      keys.forEach(k=>{
-        const n = p.querySelector(`.tl-node[data-event-key="${k}"]`);
-        if(!n) return;
-        n.classList.add("cited-hl");
-        const idx = nodes.indexOf(n);
-        if(idx>=0 && idx<minIdx) minIdx = idx;
-      });
-      for(let i=minIdx;i<ownIdx;i++) nodes[i].classList.add("rail-hl");
-      el.classList.add("cited-hl");
-    });
-    el.addEventListener("mouseleave", ()=>{
-      p.querySelectorAll(".cited-hl").forEach(n=>n.classList.remove("cited-hl"));
-      p.querySelectorAll(".rail-hl").forEach(n=>n.classList.remove("rail-hl"));
-    });
-  });
 }
 
 function renderActionsPanel(){
@@ -1747,18 +1568,16 @@ function renderActionsPanel(){
   if(!p.length){
     content = `<div class="empty">No actions pending.</div>`;
   } else {
-    // Decision: an event only ever shows here if a proposed action is actually tied to it (via
-    // causes) — no orphan events. Each action nests under its primary cause (see primaryCause);
-    // when two+ actions share the same primary cause, they stack under one copy of that event
-    // instead of repeating it. Multi-cause actions still cite their earlier causes — those just
-    // surface via hover (wireTimelineHover) rather than a second static nesting.
+    // Decision: the agent cites a single event per action it proposes — no orphan events.
+    // An event only ever shows here if a proposed action is actually tied to it (via cause).
+    // When two+ actions share the exact same cause, group them under one copy of that event
+    // instead of repeating the event once per action.
     const groups = [];
     const groupByKey = new Map();
     p.forEach((a,i)=>{
-      const primary = primaryCause(a);
-      const key = primary ? causeKey(primary) : `none:${i}`;
+      const key = a.cause ? `${a.cause.type}:${a.cause.id}` : `none:${i}`;
       if(!groupByKey.has(key)){
-        const g = { cause: primary, actions: [] };
+        const g = { cause: a.cause, actions: [] };
         groupByKey.set(key, g);
         groups.push(g);
       }
@@ -1932,7 +1751,6 @@ function renderPanel(){
 
 function wire(){
   const p = $("panel"); if(!p) return;
-  wireTimelineHover(p);
   p.querySelectorAll("[data-toggle-ne]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const id=el.dataset.toggleNe; if(openNewEvents.has(id)) openNewEvents.delete(id); else openNewEvents.add(id); renderPanel(); });
   p.querySelectorAll("[data-open-email-drawer]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); openEmailDrawer(el.dataset.openEmailDrawer); });
   p.querySelectorAll("[data-app]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); actionState[+el.dataset.app]="approved"; expandedCard=null; renderPanel(); });
@@ -1943,12 +1761,6 @@ function wire(){
   p.querySelectorAll("[data-save]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const i=+el.dataset.save; const inp=document.getElementById("ci"+i); if(inp) editValues[i]=inp.value; editingCard=null; renderPanel(); });
   p.querySelectorAll("[data-canceledit]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); editingCard=null; renderPanel(); });
   p.querySelectorAll("[data-resume-agent]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); agentPaused=false; render(); });
-  p.querySelectorAll("[data-ai-refine]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const [idx,type]=el.dataset.aiRefine.split(":"); const inp=p.querySelector(`[data-ai-input="${idx}"]`); if(inp) inp.value=""; aiRefineDraft(idx, type); });
-  p.querySelectorAll("[data-ai-input]").forEach(el=>el.onkeydown=(e)=>{ if(e.key==="Enter"){ e.preventDefault(); e.stopPropagation(); if(!el.value.trim()) return; const idx=el.dataset.aiInput; el.value=""; aiRefineDraft(idx, null); } });
-  p.querySelectorAll("[data-ai-submit]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const idx=el.dataset.aiSubmit; const inp=p.querySelector(`[data-ai-input="${idx}"]`); if(!inp||!inp.value.trim()) return; inp.value=""; aiRefineDraft(idx, null); });
-  p.querySelectorAll("[data-ai-focus]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); p.querySelector(`[data-ai-input="${el.dataset.aiFocus}"]`)?.focus(); });
-  p.querySelectorAll("[data-ai-undo]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); aiUndoRedo(el.dataset.aiUndo, false); });
-  p.querySelectorAll("[data-ai-redo]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); aiUndoRedo(el.dataset.aiRedo, true); });
   p.querySelectorAll("[data-open-thread]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); openThreadDrawer(el.dataset.openThread); });
   p.querySelectorAll("[data-back-activity]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); selectedEmailId=null; threadOpenEmails=new Set(); renderPanel(); });
   p.querySelectorAll("[data-expand-email]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const id=el.dataset.expandEmail; if(threadOpenEmails.has(id)) threadOpenEmails.delete(id); else threadOpenEmails.add(id); renderPanel(); });
@@ -2017,14 +1829,14 @@ function render(){
   if(view==="billing"){
     main.innerHTML = renderTopbar(TB.billing) + renderBilling();
     const cab = $("collAgentBtn");
-    if(cab) cab.onclick=()=>{ view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null; threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set(); expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false; openNewEvents=new Set(); recipientPills={}; draftHistory={}; draftRedo={}; aiGenerating=false; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; agentPaused=false; activeTab="actions"; activityFilter="all"; render(); };
+    if(cab) cab.onclick=()=>{ view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null; threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set(); expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false; openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; agentPaused=false; activeTab="actions"; activityFilter="all"; render(); };
   } else if(view==="customer"){
     main.innerHTML = renderTopbar(TB.customer()) + renderCustomer();
     main.querySelectorAll("[data-nav-to-detail]").forEach(el=>el.onclick=()=>{
       view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null;
       threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set();
       expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false;
-      openNewEvents=new Set(); recipientPills={}; draftHistory={}; draftRedo={}; aiGenerating=false; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; agentPaused=false;
+      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; agentPaused=false;
       activeTab="actions"; activityFilter="all"; render();
     });
     $("backBtn") && ($("backBtn").onclick=()=>{ view="inbox"; render(); });
@@ -2074,7 +1886,7 @@ function render(){
       view="detail"; actionState = (SCENARIO.initialActionState ? {...SCENARIO.initialActionState} : {}); editingCard=null; editValues={}; expandedCard=null;
       threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set();
       expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false;
-      openNewEvents=new Set(); recipientPills={}; draftHistory={}; draftRedo={}; aiGenerating=false; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; agentPaused=false;
+      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; agentPaused=false;
       activeTab="actions"; activityFilter="all"; render();
     });
   } else {
