@@ -135,11 +135,20 @@ Always visible in the title row regardless of active tab: a **Flag** toggle (out
 
 **Clicking Flag (in either direction) doesn't toggle it directly** — it opens a small inline popover (`.flag-popover`, state `flagPopoverOpen`) anchored right under the button asking why, with a textarea and Cancel/Confirm. Only Confirm actually flips `agentEscalated`; Cancel or a click outside just closes the popover with no change. Deliberately a small anchored popover, not a full modal overlay — matches the app's other small popovers (`.filter-dropdown` etc.) rather than introducing a new heavier pattern. The typed reason isn't persisted or shown anywhere yet (no activity-log entry, no tooltip) — that's a reasonable next step if this needs to feel more real, not built since it wasn't asked for.
 
-### 9. Agent Summary: flat convince-to-approve bullets, static
+### 9. Agent Summary: three fixed slots, always exactly 3 bullets, no conditional flag
 
-Went through a Recommendation/Why/Evidence broken-out-sections version and then **back to a flat bullet list** — the sections read as "blue on blue" and added structure without adding clarity. `SCENARIO.agentSummary` is a plain array of 3-4 strings (bold via `**...**`), rendered by `renderAgentSummary()` as a single `<ul class="as-bullets">`, no sub-labels or cards.
+Went through a Recommendation/Why/Evidence broken-out-sections version and then **back to a flat bullet list** — the sections read as "blue on blue" and added structure without adding clarity. `SCENARIO.agentSummary` is a plain array of strings (bold via `**...**`), rendered by `renderAgentSummary()` as a single `<ul class="as-bullets">`, no sub-labels or cards.
 
-The bullets themselves are written to a specific brief: **the minimum a reviewer needs to click Approve without digging further** — what the customer actually asked for, the invoice's dollar/overdue state, and why approving is safe (nothing outside what was asked, no dispute). The framing question when writing these for a new scenario: *how do I convince a user to just click approve, fast?* — not "summarize everything that happened." **Default to 3 bullets, not 4** — a 4th tends to read as padding (a separate "no dispute" closer, once tried, felt like restating what the other bullets already implied — it got folded into another bullet instead of cut outright, since "no dispute" is still worth saying, just not as its own line). Only reach for a 4th bullet if there's a genuinely distinct fact that doesn't fit in the other three and would otherwise get lost (e.g. Northwind's "the contact update already auto-executed" — real, load-bearing information, not filler restating the other bullets).
+**Why open-ended LLM generation for this was unreliable in practice**: a single unconstrained generation has to simultaneously (a) figure out what *kind* of situation it's looking at and (b) pick the right facts for that specific kind, every time, from scratch. Decoupling those into a classify-then-fill-template step is what actually fixed it. Validated by reconstructing 9 real triggers from production data (AirOps, Meter, Attentive — disputes, claimed-paid conflicts, non-response escalations, and routine closeouts) and drafting this shape of summary against the real email threads: it held up read-only, without needing to click into the thread, across all of them.
+
+**Bullets are always exactly 3, one per fixed slot, in this order — never 2, never 4:**
+1. **Trigger** — what the customer actually said/asked, stated plainly. This one is close to deterministic: it's describing an event that already happened, not summarizing a judgment call.
+2. **Key facts** — the narrow, scoped facts a reviewer needs: the invoice's dollar/overdue state, plus any other single fact that's load-bearing enough to change the read if left out (e.g. Northwind's "the contact update already auto-executed").
+3. **Recommendation** — why approving the proposed action(s) is safe (nothing outside what was asked, no dispute), or, for a genuine dispute/conflict, what's actually being asked for rather than an assumption either way.
+
+The framing question when writing these for a new scenario is still *how do I convince a user to just click approve, fast?* — not "summarize everything that happened."
+
+**No 4th "flag" bullet, even for escalated/dispute scenarios.** An earlier version of this framework added a conditional 4th bullet that fired only when a customer was flagged/escalated, to call that out in the summary text. Cut it: the product already has a real, first-class control for exactly that (the Flag button + reason popover, decision #8) — a bullet that says "this is escalated" would just be restating in prose what the Flag badge on the row already shows. Keeping escalation state out of the bullets also keeps the 3 slots doing one job each, consistently, whether or not the customer is flagged.
 
 Tried a real-time character-by-character typing effect on open (matching the AI-refine composer's "Polish" streaming, plus a sweep/pulse glow on the box), and a small static agent-mark next to the label — both reverted/cut in the July descope. `renderAgentSummary()` is a pure function of `SCENARIO.agentSummary`, bullets render complete the instant the page opens, no motion, no delay, no icon.
 
@@ -152,7 +161,7 @@ For a while, an action's `cause` field became `causes` (always an array), so a r
 ## Mock data
 
 Two scenarios, each a `SCENARIO_*` object + matching `THREADS_*` array (see "Two scenarios" above for the narrative). Each `SCENARIO_*` holds:
-- `agentSummary` — `{recommendation, why, evidence: [...]}` (bold via `**...**` in any field), rendered in the blue "Agent Summary" callout via `renderAgentSummary()`. See decision #9.
+- `agentSummary` — a plain array of exactly 3 strings, one per fixed slot (Trigger, Key facts, Recommendation; bold via `**...**`), rendered in the blue "Agent Summary" callout via `renderAgentSummary()`. See decision #9.
 - `invoices` — outstanding invoice data for that customer.
 - `proposed` — the action cards, each with a `cause` tying it to a triggering email.
 - `scheduled` — agent tasks and dunning data.

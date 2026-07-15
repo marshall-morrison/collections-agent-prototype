@@ -42,9 +42,14 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function mdToHtml(t){ return t.trim().split(/\n\n+/).map(p=>`<p>${p.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,' ')}</p>`).join(''); }
 function mdInline(t){ return t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>'); }
-// Flat bullets, not broken-out sections: 3-4 lines that give a reviewer just enough to click
-// Approve without digging further — what was asked, the state of the invoice, and why
-// approving is safe (no dispute, nothing outside what was requested).
+// Flat bullets, not broken-out sections. Always exactly 3, one per fixed slot, in order:
+//   1. Trigger     - what the customer actually asked/said (deterministic; not "summarized," just stated)
+//   2. Key facts   - the narrow scoped facts a reviewer needs: invoice amount/overdue state, plus
+//                    any other fact load-bearing enough to change the read (e.g. an action already auto-executed)
+//   3. Recommendation - why approving the proposed action(s) is safe, or what's actually being asked
+//                    for when it isn't (a dispute) - the "click Approve" close
+// No conditional 4th "flag" bullet: escalation already has a real control (the Flag button, decision #8) -
+// a text bullet restating "this is escalated" would just duplicate a decision the UI already surfaces.
 function renderAgentSummary(s){
   const items = s.agentSummary.map(b=>`<li>${mdInline(b)}</li>`).join("");
   return `<ul class="as-bullets">${items}</ul>`;
@@ -244,9 +249,9 @@ function sortRows(rows){
 const SCENARIO_MERIDIAN = {
   customer: "Meridian Group",
   agentSummary: [
-    "Dana Reed asked for a signed W-9 and a contact update to **ap@meridiangroup.com** — both required before payment releases.",
-    "INV-2241 (**$10,890**) is 21 days overdue; the last dunning reminder was opened but never answered.",
-    "No dispute, no new terms — a paperwork gap, not a collections risk.",
+    "Dana Reed asked for a signed W-9 and a billing contact update to **ap@meridiangroup.com**; both are required before payment releases.",
+    "INV-2241 (**$10,890**) is 21 days overdue, and the last dunning reminder was opened but never answered.",
+    "No dispute, no new terms: a paperwork gap, not a collections risk.",
   ],
   invoices: [
     { num:"INV-2241", due:"Jun 1, 2026",  amount:10890, od:21, status:"Overdue" },
@@ -415,9 +420,9 @@ const THREADS_NORTHWIND = [
 const SCENARIO_NORTHWIND = {
   customer: "Northwind Traders",
   agentSummary: [
-    "Tom Reilly asked to update the billing contact to **ap@northwindtraders.com** and resend INV-3102, which he can't locate — no dispute, just a routine ask.",
-    "Contact update already auto-executed per policy; the resend + reply just needs a look, as outbound email always does.",
-    "INV-3102 (**$28,100**), 35 days overdue, is the oldest and largest of Northwind's 3 open invoices — clearing Tom's blocker is the priority.",
+    "Tom Reilly asked to update the billing contact to **ap@northwindtraders.com** and resend INV-3102, which he can't locate; no dispute, just a routine ask.",
+    "The contact update already auto-executed per policy. INV-3102 (**$28,100**), 35 days overdue, is the oldest and largest of Northwind's 3 open invoices.",
+    "Only the reply with the resent invoice needs your review; approving it clears Tom's blocker without changing anything else on the account.",
   ],
   invoices: [
     { num:"INV-3102", due:"Jun 1, 2026",  amount:28100, od:35, status:"Overdue" },
