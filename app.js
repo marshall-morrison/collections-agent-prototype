@@ -50,8 +50,9 @@ function mdInline(t){ return t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>'); 
 //                    for when it isn't (a dispute) - the "click Approve" close
 // No conditional 4th "flag" bullet: escalation already has a real control (the Flag button, decision #8) -
 // a text bullet restating "this is escalated" would just duplicate a decision the UI already surfaces.
+const AS_SLOTS = ["Trigger","Key facts","Recommendation"];
 function renderAgentSummary(s){
-  const items = s.agentSummary.map(b=>`<li>${mdInline(b)}</li>`).join("");
+  const items = s.agentSummary.map((b,i)=>`<li>${mdInline(b)}<span class="as-slot">${AS_SLOTS[i]||""}</span></li>`).join("");
   return `<ul class="as-bullets">${items}</ul>`;
 }
 function entityClass(e){ return {customer:"customer",system:"system",dunning:"system",agent:"agent",merchant:"merchant"}[e]||"system"; }

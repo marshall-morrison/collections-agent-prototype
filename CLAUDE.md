@@ -137,7 +137,9 @@ Always visible in the title row regardless of active tab: a **Flag** toggle (out
 
 ### 9. Agent Summary: three fixed slots, always exactly 3 bullets, no conditional flag
 
-Went through a Recommendation/Why/Evidence broken-out-sections version and then **back to a flat bullet list** — the sections read as "blue on blue" and added structure without adding clarity. `SCENARIO.agentSummary` is a plain array of strings (bold via `**...**`), rendered by `renderAgentSummary()` as a single `<ul class="as-bullets">`, no sub-labels or cards.
+Went through a Recommendation/Why/Evidence broken-out-**sections** version (each its own labeled block/card) and reverted — that read as "blue on blue" and added structure without adding clarity. `SCENARIO.agentSummary` is a plain array of strings (bold via `**...**`), rendered by `renderAgentSummary()` as a single `<ul class="as-bullets">`.
+
+Each `<li>` does carry a small caption underneath it (`.as-slot`, `AS_SLOTS = ["Trigger","Key facts","Recommendation"]`, matched to the bullet by array index) — a single line of 9.5px muted mono uppercase, not a label/header/card. This is a lighter-weight thing than the reverted sectioned version: it doesn't restructure the box, just names which fixed slot each bullet is already filling, so the discipline behind the 3 bullets is visible at a glance rather than only living in this doc.
 
 **Why open-ended LLM generation for this was unreliable in practice**: a single unconstrained generation has to simultaneously (a) figure out what *kind* of situation it's looking at and (b) pick the right facts for that specific kind, every time, from scratch. Decoupling those into a classify-then-fill-template step is what actually fixed it. Validated by reconstructing 9 real triggers from production data (AirOps, Meter, Attentive — disputes, claimed-paid conflicts, non-response escalations, and routine closeouts) and drafting this shape of summary against the real email threads: it held up read-only, without needing to click into the thread, across all of them.
 
