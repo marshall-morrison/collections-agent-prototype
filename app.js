@@ -493,6 +493,7 @@ let expandedHeaders = new Set();
 let showBcc = false;
 let attachPickerOpen = false;
 let agentEscalated = false;
+let flagPopoverOpen = false;   // small "why are you flagging this?" popover, shown only when turning the flag ON
 let agentPaused = false;
 let activityFilter = "all";     // "all" | "email" — Activity tab
 // scheduled tab state
@@ -1399,10 +1400,21 @@ function renderDetailHeader(){
     <div style="padding:14px 22px 6px;display:flex;align-items:center;gap:12px">
       <span class="page-title">${esc(SCENARIO.customer)}</span>
       <div class="top-actions">
-        <button class="btn-icon ${agentEscalated?"flagged":""}" id="flagBtn">
-          ${agentEscalated?ICON.flagFill:ICON.flagOut}
-          <span class="icon-tip">${agentEscalated?"Remove flag":"Flag this customer — makes your agent aware of the flag and filterable on the Collections Agent table"}</span>
-        </button>
+        <div style="position:relative;display:inline-block">
+          <button class="btn-icon ${agentEscalated?"flagged":""}" id="flagBtn">
+            ${agentEscalated?ICON.flagFill:ICON.flagOut}
+            <span class="icon-tip">${agentEscalated?"Remove flag":"Flag this customer — makes your agent aware of the flag and filterable on the Collections Agent table"}</span>
+          </button>
+          ${flagPopoverOpen ? `
+          <div class="flag-popover" id="flagPopover">
+            <div class="flag-popover-label">${agentEscalated?"Why remove this flag?":"Why are you flagging this customer?"}</div>
+            <textarea class="flag-popover-input" id="flagReasonInput" rows="2" placeholder="${agentEscalated?"e.g. issue resolved":"e.g. customer threatened to churn"}"></textarea>
+            <div class="flag-popover-actions">
+              <button class="btn btn-tertiary" id="flagCancelBtn">Cancel</button>
+              <button class="btn btn-primary" id="flagConfirmBtn">Confirm</button>
+            </div>
+          </div>` : ""}
+        </div>
         <button class="btn-topbar ${agentPaused?"paused":""}" id="pauseBtn">
           ${agentPaused
             ? LU('<polygon points="6 3 20 12 6 21 6 3"/>')+"Resume Agent"
@@ -1829,14 +1841,14 @@ function render(){
   if(view==="billing"){
     main.innerHTML = renderTopbar(TB.billing) + renderBilling();
     const cab = $("collAgentBtn");
-    if(cab) cab.onclick=()=>{ view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null; threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set(); expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false; openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; agentPaused=false; activeTab="actions"; activityFilter="all"; render(); };
+    if(cab) cab.onclick=()=>{ view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null; threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set(); expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false; openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; activeTab="actions"; activityFilter="all"; render(); };
   } else if(view==="customer"){
     main.innerHTML = renderTopbar(TB.customer()) + renderCustomer();
     main.querySelectorAll("[data-nav-to-detail]").forEach(el=>el.onclick=()=>{
       view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null;
       threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set();
       expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false;
-      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; agentPaused=false;
+      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false;
       activeTab="actions"; activityFilter="all"; render();
     });
     $("backBtn") && ($("backBtn").onclick=()=>{ view="inbox"; render(); });
@@ -1886,14 +1898,22 @@ function render(){
       view="detail"; actionState = (SCENARIO.initialActionState ? {...SCENARIO.initialActionState} : {}); editingCard=null; editValues={}; expandedCard=null;
       threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set();
       expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false;
-      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; agentPaused=false;
+      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false;
       activeTab="actions"; activityFilter="all"; render();
     });
   } else {
     main.innerHTML = renderTopbar(TB.detail())+renderDetailHeader()+`<div class="panel" id="panel"></div>`;
     renderPanel();
     main.querySelectorAll("[data-crumb]").forEach(el=>el.onclick=()=>{ view=el.dataset.crumb; render(); });
-    $("flagBtn").onclick=()=>{ agentEscalated=!agentEscalated; render(); };
+    $("flagBtn").onclick=(e)=>{ e.stopPropagation(); flagPopoverOpen=!flagPopoverOpen; render(); };
+    const flagPopover = $("flagPopover");
+    if(flagPopover){
+      flagPopover.onclick=(e)=>e.stopPropagation();
+      $("flagCancelBtn").onclick=()=>{ flagPopoverOpen=false; render(); };
+      $("flagConfirmBtn").onclick=()=>{ agentEscalated=!agentEscalated; flagPopoverOpen=false; render(); };
+      $("flagReasonInput").focus();
+    }
+    document.onclick=()=>{ if(flagPopoverOpen){ flagPopoverOpen=false; render(); } };
     $("pauseBtn").onclick=()=>{ agentPaused=!agentPaused; render(); };
     main.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
       if(b.dataset.tab==="settings") return;
