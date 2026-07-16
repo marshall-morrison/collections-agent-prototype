@@ -93,11 +93,11 @@ const WORKLIST_REAL = [
   {
     id: "meridian",
     customer: "Meridian Group",
-    invoices: ["INV-2241","INV-2243"],
-    outstandingAmt: 15890,
-    overdueAmt: 10890,
-    eventSummary: "Dana requested a W-9 and billing contact update before processing payment",
-    proposedActions: ["Send email","Update primary billing contact"],
+    invoices: ["INV-2241","INV-2243","INV-2250","INV-2255","INV-2260"],
+    outstandingAmt: 23340,
+    overdueAmt: 5390,
+    eventSummary: "Dana Reed still needs a signed W-9; the contact and address updates she asked for are already applied",
+    proposedActions: ["Send email"],
     escalated: false,
     planStatus: "review",
     paused: false,
@@ -141,6 +141,32 @@ const WORKLIST_REAL = [
     planStatus: "executed",
     paused: true,
     mostOverdueDays: 12,
+  },
+  {
+    id: "fairmont",
+    customer: "Fairmont Logistics",
+    invoices: ["INV-7710","INV-7688"],
+    outstandingAmt: 7600,
+    overdueAmt: 6400,
+    eventSummary: "Two unrelated asks: a contact update and a separate invoice resend",
+    proposedActions: ["Update primary billing contact","Send email"],
+    escalated: false,
+    planStatus: "review",
+    paused: false,
+    mostOverdueDays: 6,
+  },
+  {
+    id: "cobalt",
+    customer: "Cobalt Fitness",
+    invoices: ["INV-5520","INV-5521"],
+    outstandingAmt: 13200,
+    overdueAmt: 0,
+    eventSummary: "One email covering seven separate asks: hold, PO, contact/address, wire match, flag, check-in, contract",
+    proposedActions: ["Mark invoice pending","Update PO number","Update customer info","Apply cash app recommendation","Flag customer","Schedule task","Send email"],
+    escalated: false,
+    planStatus: "review",
+    paused: false,
+    mostOverdueDays: null,
   },
 ];
 
@@ -201,7 +227,7 @@ const INBOX_COLUMNS = [
   { key:"overdue", label:"Total overdue", sortable:true, align:"r", pinned:true },
   { key:"outstanding", label:"Total outstanding", sortable:true, align:"r" },
   { key:"oldestOverdue", label:"Oldest overdue", sortable:true, align:"r" },
-  { key:"invoices", label:"Open invoices", align:"r" },
+  { key:"invoices", label:"Open invoices", sortable:true, align:"r" },
 ];
 
 // Worklist "Add filter" definitions — each maps to a predicate over a row. "Flag" (formerly
@@ -252,6 +278,7 @@ function sortValue(r, key){
     case "outstanding": return r.outstandingAmt||0;
     case "overdue": return r.overdueAmt||0;
     case "oldestOverdue": return r.mostOverdueDays==null ? -1 : r.mostOverdueDays;
+    case "invoices": return r.invoices.length;
     default: return 0;
   }
 }
@@ -261,150 +288,151 @@ function sortRows(rows){
   return [...rows].sort((a,b)=>(sortValue(a,inboxSort.key)-sortValue(b,inboxSort.key))*mul);
 }
 
+// Meridian is the "shows everything" scenario: a narrative across 2 distinct email threads
+// that between them touch every Activity Log entry type in the real PRD spec (mark pending,
+// update customer info, scheduled task fired, flag + unflag, invoice status changes both
+// automatic and manual, cash application both automatic and manual, payment failure). The
+// billing-contact/CC/address changes auto-execute without review (decision #9's "still has an
+// auto-executed entry") — the only thing left pending is the W-9 reply.
 const SCENARIO_MERIDIAN = {
   customer: "Meridian Group",
   agentSummary: [
-    "Dana Reed asked for a signed W-9 and a billing contact update to **ap@meridiangroup.com**; both are required before payment releases.",
-    "INV-2241 (**$10,890**) is 21 days overdue, and the last dunning reminder was opened but never answered.",
-    "No dispute, no new terms: a paperwork gap, not a collections risk.",
+    "Dana Reed says a signed W-9 is required before Meridian can process payment on INV-2241.",
+    "The billing contact, CC, and address changes she asked for earlier are already applied; INV-2241 (**$5,390** remaining after a partial payment) is still past due.",
+    "Sending the signed W-9 is a paperwork request, not a collections risk: nothing else on the account is in dispute.",
   ],
   invoices: [
-    { num:"INV-2241", due:"Jun 1, 2026",  amount:10890, od:21, status:"Overdue" },
+    { num:"INV-2241", due:"Jun 1, 2026",  amount:10890, od:21, status:"Partially paid" },
     { num:"INV-2243", due:"Jun 15, 2026", amount:5000,  od:0,  status:"Sent" },
-    { num:"INV-2250", due:"May 28, 2026", amount:1450,  od:25, status:"Overdue" },
+    { num:"INV-2250", due:"May 28, 2026", amount:1450,  od:0,  status:"Paid" },
     { num:"INV-2255", due:"Jun 20, 2026", amount:3200,  od:0,  status:"Sent" },
     { num:"INV-2260", due:"Jul 1, 2026",  amount:2800,  od:0,  status:"Pending" },
   ],
-  // cat: "ai" = agent decided & executed · "user" = a human approved/took it · "system" = automated, no decision
+  // cat: "ai" = agent decided & executed · "user" = a human did it directly · "system" = automated, no decision.
+  // text follows the real PRD Activity Log spec's own vocabulary verbatim (actor bolded inline,
+  // e.g. "**TABS** changed Status from X to Y of Invoice") — see decision #2.
   events: [
-    { kind:"invoice_aged",    cat:"system", date:"Apr 25, 2026", time:"12:00 AM", text:"INV-2241 crossed 30 days past due — $10,890", agent:false },
-    { kind:"update_po",       cat:"ai",     date:"May 5, 2026",  time:"10:30 AM", text:"Agent set PO 12345 on INV-2241", agent:true },
-    { kind:"update_contacts", cat:"user",   date:"May 6, 2026",  time:"9:45 AM",  text:"Billing contact updated to ap@meridiangroup.com — approved by Priya Sharma", agent:true },
-    { kind:"match_tx",        cat:"ai",     date:"May 20, 2026", time:"3:10 PM",  agent:true,
-      html:`Agent matched payment $10,233.60 from Meridian Group to <a href="#" onclick="return false" style="color:var(--ink);text-decoration:underline">INV-22275</a> (<a href="#" onclick="return false" style="color:var(--ink);text-decoration:underline">→ transaction</a>)` },
-    { kind:"ptp_logged",      cat:"customer", date:"May 28, 2026", time:"10:05 AM", text:"Customer promised to pay $10,890 by Jun 2 via ACH", agent:false },
-    { kind:"invoice_pending", cat:"ai",     date:"May 30, 2026", time:"1:05 PM",  text:"INV-2241 moved to pending and dunning paused: customer says payment sent", agent:true },
-    { kind:"invoice_resumed", cat:"ai",     date:"Jun 1, 2026",  time:"8:00 AM",  text:"INV-2241 moved back to overdue and dunning resumed: payment not confirmed", agent:true },
-    { kind:"payment_failed",  cat:"system", date:"Jun 1, 2026",  time:"11:42 PM", text:"Payment failed — $10,890 on INV-2241 (R01 insufficient funds)", agent:false },
-    { kind:"dunning_sent",    cat:"system", date:"Jun 2, 2026",  time:"8:05 AM",  text:"Dunning reminder 2 of 4 sent automatically to finance@meridiangroup.com", agent:false },
-    { kind:"scheduled_task",  cat:"ai",     date:"Jun 2, 2026",  time:"9:00 AM",  text:"Agent confirmed INV-2241 hadn't been paid by the PTP date and drafted a follow-up", agent:true },
-    { kind:"customer_paid",   cat:"customer", date:"Jun 2, 2026", time:"11:00 AM", text:"Customer paid $5,500 toward INV-2241 via ACH", agent:false },
-    { kind:"payment_applied", cat:"system", date:"Jun 2, 2026",  time:"11:30 AM", text:"Payment applied — $5,500 to INV-2241 ($5,390 remaining)", agent:false },
-    { kind:"ptp_broken",      cat:"system", date:"Jun 2, 2026",  time:"12:00 AM", text:"Promise to pay broken — $10,890 due Jun 2, not received", agent:false },
-    { kind:"credit_memo",     cat:"user",   date:"Jun 3, 2026",  time:"10:00 AM", agent:true,
-      html:`Credit memo $415 created and applied to <a href="#" onclick="return false" style="color:var(--ink);text-decoration:underline">INV-8826</a> (<a href="#" onclick="return false" style="color:var(--ink);text-decoration:underline">→ view memo</a>) — approved by Priya Sharma` },
-    { kind:"escalated",       cat:"user",   date:"Jun 3, 2026",  time:"2:30 PM",  text:"Customer flagged: customer threatened to churn", agent:false },
-    { kind:"invoice_voided",  cat:"ai",     date:"Jun 4, 2026",  time:"9:15 AM",  text:"INV-2242 voided (duplicate)", agent:true },
+    { kind:"update_po",       cat:"ai",   date:"May 5, 2026", time:"10:30 AM", text:"**Collections Agent** set PO 12345 on INV-2241", agent:true },
+    { kind:"update_contacts", cat:"ai",   date:"May 5, 2026", time:"10:31 AM", text:"**Collections Agent** set primary billing contact to James Hart, ap@meridiangroup.com", agent:true },
+    { kind:"update_contacts", cat:"ai",   date:"May 5, 2026", time:"10:32 AM", text:"**Collections Agent** added CC billing contact Dan Kowalski, ar@meridiangroup.com", agent:true },
+    { kind:"update_contacts", cat:"ai",   date:"May 5, 2026", time:"10:33 AM", text:"**Collections Agent** updated billing address to 500 Market St, Suite 400, San Francisco, CA 94105", agent:true },
+    { kind:"cash_app",        cat:"system", date:"Jun 2, 2026", time:"11:00 AM", text:"**TABS** created Payment pi_3Ok9x2KLh8", agent:false },
+    { kind:"invoice_status",  cat:"system", date:"Jun 2, 2026", time:"11:05 AM", text:"**TABS** changed Status from SENT to PARTIALLY_PAID + Balance Remaining from $10,890.00 to $5,390.00 of Invoice", agent:false },
+    { kind:"cash_app",        cat:"system", date:"Jun 2, 2026", time:"11:06 AM", text:"Payment completed", agent:false },
+    { kind:"mark_pending",    cat:"ai",   date:"Jun 3, 2026", time:"9:15 AM",  text:"**Collections Agent** changed Status from SENT to PENDING of Invoice", agent:true },
+    { kind:"payment_failed",  cat:"system", date:"Jun 6, 2026", time:"8:00 AM",  text:"**TABS** changed Status from OPEN to FAILED of Payment pi_3Ok9y7Rm2", agent:false },
+    { kind:"payment_failed",  cat:"system", date:"Jun 6, 2026", time:"8:01 AM",  text:"**TABS** changed Status from PENDING to SENT of Invoice (the invoice reverts when the charge fails)", agent:false },
+    { kind:"scheduled_task",  cat:"ai",   date:"Jun 6, 2026", time:"9:00 AM",  text:"**Collections Agent** ran a scheduled task: Check whether the remaining $5,390.00 balance on INV-2241 has cleared; if the autopay attempt failed, send a follow-up.", agent:true },
+    { kind:"flag",            cat:"user", date:"Jun 8, 2026", time:"4:40 PM",  text:"**Priya Sharma** flagged customer: customer threatened to churn after repeated dunning on the failed autopay", agent:false },
+    { kind:"flag",            cat:"user", date:"Jun 9, 2026", time:"2:15 PM",  text:"**Priya Sharma** unflagged customer: resolved by phone, remaining balance now on a manual wire", agent:false },
+    { kind:"invoice_status",  cat:"user", date:"Jun 10, 2026", time:"11:20 AM", text:"**Priya Sharma** changed Status from SENT to VOID of Invoice INV-2242 (duplicate of INV-2241)", agent:false },
+    { kind:"cash_app",        cat:"user", date:"Jun 11, 2026", time:"3:00 PM",  text:"**Priya Sharma** created Payment ch_1abcXY9", agent:false },
   ],
   scheduled: [
-    { type:"agent_task", id:"st1", date:"Jun 10, 2026", time:"9:00 AM",
-      prompt:"Re-check if INV-2241 has been paid. If not and there has been no customer reply, send the next dunning follow-up. If they replied, re-plan." },
-    { type:"dunning", id:"d1", date:"Jun 12, 2026", time:"8:00 AM",
-      step:"Reminder 2 of 4", to:"finance@meridiangroup.com", subject:"Following up: invoice INV-2241 still outstanding" },
-    { type:"dunning", id:"d2", date:"Jun 19, 2026", time:"8:00 AM",
+    { type:"agent_task", id:"st1", date:"Jun 13, 2026", time:"9:00 AM",
+      prompt:"Check whether the signed W-9 has been received and whether INV-2241's remaining $5,390 balance has cleared via the manual wire. If the balance is still unpaid, send a follow-up." },
+    { type:"dunning", id:"d1", date:"Jun 16, 2026", time:"8:00 AM",
       step:"Reminder 3 of 4", to:"finance@meridiangroup.com", subject:"INV-2241: please remit" },
-    { type:"dunning", id:"d3", date:"Jun 26, 2026", time:"8:00 AM",
+    { type:"dunning", id:"d2", date:"Jun 23, 2026", time:"8:00 AM",
       step:"Final notice", to:"finance@meridiangroup.com", subject:"Final notice: INV-2241" },
   ],
 
-  // events that triggered these agent actions — email IDs or inline event objects
-  // Every cited event must have a proposed action tied to it (via that action's own `cause`) —
-  // no orphan "this happened too" entries. payment_failed was removed from here for exactly
-  // that reason: neither proposed action below is caused by it.
-  newEvents: [
-    { type:"email", id:"e3a" },
-    { type:"email", id:"e3b" },
-  ],
-
   proposed: [
-    { kind:"update_contacts", desc:"Update primary billing contact → ap@meridiangroup.com", editableContact:"ap@meridiangroup.com",
-      cause:{ type:"email", id:"e3a" } },
-    { kind:"send_email", desc:"Reply to Dana Reed with signed W-9 attached, confirm billing contact update", invoice:"INV-2241",
-      cause:{ type:"email", id:"e3b" },
+    { kind:"send_email", desc:"Reply to Dana Reed with signed W-9 attached", invoice:"INV-2241",
+      cause:{ type:"email", id:"e2" },
       attachments:[{name:"W-9_GeneralCatalyst.pdf"}],
-      draft:{ to:"finance@meridiangroup.com", cc:"ap@meridiangroup.com", subject:"Re: INV-2241: W-9 + billing contact",
-        body:"Hi Dana,\n\nThanks for flagging both. The signed W-9 is attached, and I've also updated the billing contact to ap@meridiangroup.com as requested.\n\nLet me know if anything else is needed.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
+      draft:{ to:"finance@meridiangroup.com", cc:"ap@meridiangroup.com", subject:"Re: Billing contact, address & W-9",
+        body:"Hi Dana,\n\nThanks for the note. The signed W-9 is attached.\n\nAs a reminder, the billing contact, CC, and address changes you asked for are already applied on our end.\n\nLet me know if anything else is needed.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
         attachments:[{name:"W-9_GeneralCatalyst.pdf"}] },
     },
   ],
 };
 
 const THREADS_MERIDIAN = [
-  { id:"t1", subject:"INV-2241: W-9 + billing contact",
+  // Thread 1: billing contact, CC, address, and PO reference — resolved (auto-executed) days
+  // before Dana's separate, later ask for a W-9, which is what's still pending review.
+  { id:"t1", subject:"Billing contact, address & W-9",
     emails:[
-      // Invoice send — system/Postmark, engagement data available
-      { id:"e1", dir:"out", entity:"system", entityLabel:"Invoice Sent",
+      { id:"e1", dir:"in", entity:"customer",
+        from:{name:"Dana Reed",email:"finance@meridiangroup.com"},
+        to:[{name:"Priya Sharma",email:"billing@generalcatalyst.com",badge:null}], cc:[],
+        date:"May 4, 2026", time:"2:00 PM",
+        body:"Hi,\n\nA few updates on our end: please set James Hart (ap@meridiangroup.com) as our primary billing contact going forward, and CC Dan Kowalski (ar@meridiangroup.com) on invoices. Please also reference PO 12345 on this and future invoices.\n\nSeparately, our office moved — could you update our billing address to 500 Market St, Suite 400, San Francisco, CA 94105?\n\nThanks,\nDana",
+        attachments:[], badges:[] },
+      // Agent email — confirms PO + contact + CC + address, all already applied (multi-recipient: per-recipient delivery tracking)
+      { id:"e_agent", dir:"out", entity:"agent",
+        from:{name:"Collections Agent",email:"billing@generalcatalyst.com"},
+        to:[{name:"Dana Reed",email:"finance@meridiangroup.com",badge:"opened",
+             eng:{delivered:"May 5, 2026 · 11:15 AM", opened:"May 5, 2026 · 2:11 PM", clicked:"May 5, 2026 · 2:12 PM"}}],
+        cc:[
+          {name:"James Hart",email:"ap@meridiangroup.com",   eng:{delivered:"May 5, 2026 · 11:15 AM", opened:"May 5, 2026 · 4:02 PM"}},
+          {name:"Dan Kowalski",email:"ar@meridiangroup.com", eng:{delivered:"May 5, 2026 · 11:15 AM"}},
+        ],
+        date:"May 5, 2026", time:"11:15 AM",
+        body:"Hi Dana,\n\nAll set: PO 12345 is now on INV-2241, James Hart is the primary billing contact, Dan Kowalski is CC'd, and the billing address is updated to 500 Market St, Suite 400, San Francisco, CA 94105.\n\nA fresh copy of INV-2241 is attached.\n\nBest,\nGeneral Catalyst Collections",
+        attachments:[{name:"INV-2241.pdf",type:"PDF"}], badges:["opened","clicked"] },
+      // Dana's separate, later ask — the current trigger. Still pending review.
+      { id:"e2", dir:"in", entity:"customer",
+        from:{name:"Dana Reed",email:"finance@meridiangroup.com"},
+        to:[{name:"Priya Sharma",email:"billing@generalcatalyst.com",badge:null}], cc:[],
+        date:"Jun 4, 2026", time:"2:14 PM",
+        body:"Hi again,\n\nOne more thing — before we can process payment we'll need a signed W-9 from your company. Can you send that over?\n\nThanks,\nDana",
+        attachments:[], badges:[] },
+    ],
+    agentReplyDraft:"Hi Dana,\n\nThanks for the note. The signed W-9 is attached.\n\nAs a reminder, the billing contact, CC, and address changes you asked for are already applied on our end.\n\nLet me know if anything else is needed.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
+  },
+  // Thread 2: the INV-2241 payment/dunning saga — fully historical, nothing pending here.
+  { id:"t2", subject:"INV-2241 payment status",
+    emails:[
+      { id:"e3", dir:"out", entity:"system", entityLabel:"Invoice Sent",
         from:{name:"Invoice Sent",email:"billing@generalcatalyst.com"},
         to:[{name:"Dana Reed",email:"finance@meridiangroup.com",badge:"opened"}], cc:[],
         date:"May 1, 2026", time:"10:31 AM",
         body:"Hi Dana,\n\nYour invoice INV-2241 for $10,890 is attached. Payment is due Jun 1, 2026. Please use the link below to pay securely online.\n\nThanks,\nGeneral Catalyst",
         attachments:[{name:"INV-2241.pdf",type:"PDF"}], badges:["opened"] },
-      // Agent email — confirms PO applied + billing contact updated (multi-recipient: per-recipient delivery tracking)
-      { id:"e_agent", dir:"out", entity:"agent",
-        from:{name:"Collections Agent",email:"billing@generalcatalyst.com"},
-        to:[{name:"Dana Reed",email:"finance@meridiangroup.com",badge:"opened",
-             eng:{delivered:"May 6, 2026 · 11:15 AM", opened:"May 6, 2026 · 2:11 PM", clicked:"May 7, 2026 · 9:01 AM"}}],
-        cc:[
-          {name:"James Hart",email:"ap@meridiangroup.com",       eng:{delivered:"May 6, 2026 · 11:15 AM", opened:"May 6, 2026 · 4:02 PM"}},
-          {name:"Priya Nambiar",email:"controller@meridiangroup.com", eng:{delivered:"May 6, 2026 · 11:15 AM", opened:"May 7, 2026 · 8:40 AM"}},
-          {name:"Tobi Okonkwo",email:"procurement@meridiangroup.com",  eng:{delivered:"May 6, 2026 · 11:15 AM", opened:"May 6, 2026 · 5:23 PM", clicked:"May 6, 2026 · 5:24 PM"}},
-          {name:"Sarah Chen",email:"sarah.chen@meridiangroup.com",     eng:{bounced:true}},
-          {name:"Dan Kowalski",email:"ar@meridiangroup.com",           eng:{delivered:"May 6, 2026 · 11:15 AM"}},
-        ],
-        date:"May 6, 2026", time:"11:15 AM",
-        body:"Hi Dana,\n\nJust confirming: I've applied PO 12345 to INV-2241 and updated the primary billing contact to ap@meridiangroup.com as requested.\n\nA fresh copy of INV-2241 is attached.\n\nBest,\nGeneral Catalyst Collections",
-        attachments:[{name:"INV-2241.pdf",type:"PDF"}], badges:["opened"] },
-      // Dana's quick ack of the invoice — inbound, no engagement data (not Postmark-tracked)
-      { id:"e_dana_ack", dir:"in", entity:"customer",
+      { id:"e4", dir:"in", entity:"customer",
         from:{name:"Dana Reed",email:"finance@meridiangroup.com"},
         to:[{name:"Priya Sharma",email:"billing@generalcatalyst.com",badge:null}], cc:[],
         date:"May 2, 2026", time:"9:05 AM",
         body:"Got it, thanks — we'll process this by the due date.",
         attachments:[], badges:[] },
-      // Dunning reminder 1 — Postmark dunning, engagement data available
-      { id:"e2", dir:"out", entity:"dunning", entityLabel:"Dunning Reminder",
+      { id:"e5", dir:"out", entity:"dunning", entityLabel:"Dunning Reminder",
         from:{name:"Dunning Reminder",email:"billing@generalcatalyst.com"},
         to:[{name:"Dana Reed",email:"finance@meridiangroup.com",badge:"opened"}], cc:[],
         date:"May 25, 2026", time:"8:00 AM",
         body:"Hi Dana,\n\nJust a reminder that invoice INV-2241 for $10,890 is due in one week on Jun 1. Please let us know if you have any questions.\n\nGeneral Catalyst",
         attachments:[], badges:["opened"] },
-      // Priya's personal follow-up — merchant email, NOT via Postmark, no engagement data
-      { id:"e_priya", dir:"out", entity:"merchant",
+      { id:"e6", dir:"out", entity:"merchant",
         from:{name:"Priya Sharma",email:"priya@generalcatalyst.com"},
         to:[{name:"Dana Reed",email:"finance@meridiangroup.com",badge:null}], cc:[],
         date:"May 29, 2026", time:"3:20 PM",
         body:"Hi Dana,\n\nJust wanted to follow up personally — let me know if there's anything blocking payment on INV-2241. Happy to hop on a quick call.\n\nPriya",
         attachments:[], badges:[] },
-      // Dana's thanks for the contact-update turnaround — inbound, no engagement data
-      { id:"e_dana_thanks", dir:"in", entity:"customer",
+      { id:"e7", dir:"in", entity:"customer",
         from:{name:"Dana Reed",email:"finance@meridiangroup.com"},
         to:[{name:"Priya Sharma",email:"billing@generalcatalyst.com",badge:null}], cc:[],
         date:"May 30, 2026", time:"10:20 AM",
         body:"Thanks for following up, Priya — this is still with our AP team, chasing it now.",
         attachments:[], badges:[] },
-      // Dunning reminder 2 — Postmark dunning, engagement data available
-      { id:"e2b", dir:"out", entity:"dunning", entityLabel:"Dunning Reminder",
+      { id:"e8", dir:"out", entity:"dunning", entityLabel:"Dunning Reminder",
         from:{name:"Dunning Reminder",email:"billing@generalcatalyst.com"},
         to:[{name:"Dana Reed",email:"finance@meridiangroup.com",badge:"opened"}], cc:[],
         date:"Jun 2, 2026", time:"8:05 AM",
         body:"Hi Dana,\n\nInvoice INV-2241 for $10,890 was due yesterday and remains unpaid. Please remit at your earliest convenience or reach out if you need assistance.\n\nGeneral Catalyst",
         attachments:[], badges:["opened","clicked"] },
-      // Dana email 1 — billing contact request
-      { id:"e3a", dir:"in", entity:"customer",
+      { id:"e9", dir:"in", entity:"customer",
         from:{name:"Dana Reed",email:"finance@meridiangroup.com"},
         to:[{name:"Priya Sharma",email:"billing@generalcatalyst.com",badge:null}], cc:[],
-        date:"Jun 4, 2026", time:"2:14 PM",
-        body:"Hi,\n\nPlease update our billing contact on file to ap@meridiangroup.com going forward. All invoices and correspondence should go there.\n\nThanks,\nDana",
+        date:"Jun 2, 2026", time:"10:45 AM",
+        body:"Good news — we sent $5,500 today, and the remaining $5,390 is scheduled via autopay for Jun 6.",
         attachments:[], badges:[] },
-      // Dana email 2 — W-9 request (follow-up on same thread a few minutes later)
-      { id:"e3b", dir:"in", entity:"customer",
-        from:{name:"Dana Reed",email:"finance@meridiangroup.com"},
-        to:[{name:"Priya Sharma",email:"billing@generalcatalyst.com",badge:null}], cc:[],
-        date:"Jun 4, 2026", time:"2:18 PM",
-        body:"Also — before we can process payment we'll need a signed W-9 from your company. Can you send that over as well?\n\nDana",
-        attachments:[], badges:[] },
+      { id:"e10", dir:"out", entity:"agent",
+        from:{name:"Collections Agent",email:"billing@generalcatalyst.com"},
+        to:[{name:"Dana Reed",email:"finance@meridiangroup.com",badge:"opened"}], cc:[],
+        date:"Jun 6, 2026", time:"8:15 AM",
+        body:"Hi Dana,\n\nJust flagging that this morning's autopay attempt for the remaining $5,390 on INV-2241 didn't go through. Could you confirm a new date, or let us know if a different payment method would be easier?\n\nBest,\nGeneral Catalyst Collections",
+        attachments:[], badges:["opened"] },
     ],
-    agentReplyDraft:"Hi Dana,\n\nThanks for flagging both. The signed W-9 is attached, and I've also updated the billing contact to ap@meridiangroup.com as requested.\n\nA fresh copy of INV-2241 is attached as well. Let me know if anything else is needed.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
   },
 ];
 
@@ -445,18 +473,14 @@ const SCENARIO_NORTHWIND = {
     { num:"INV-3110", due:"Jun 20, 2026", amount:9200,  od:0,  status:"Sent" },
     { num:"INV-3125", due:"Jul 5, 2026",  amount:5000,  od:0,  status:"Sent" },
   ],
+  // text follows the real PRD Activity Log spec's vocabulary verbatim — see decision #2 and Meridian above.
   events: [
-    { kind:"invoice_aged",   cat:"system", date:"May 2, 2026",  time:"12:00 AM", text:"INV-3102 crossed 30 days past due — $28,100", agent:false },
-    { kind:"payment_failed", cat:"system", date:"May 28, 2026", time:"2:15 PM",  text:"Payment failed — $28,100 on INV-3102 (R01 insufficient funds)", agent:false },
-    { kind:"dunning_sent",   cat:"system", date:"Jun 2, 2026",  time:"8:00 AM",  text:"Dunning reminder 1 of 4 sent automatically to finance@northwindtraders.com", agent:false },
+    { kind:"payment_failed",  cat:"system", date:"May 28, 2026", time:"2:15 PM",  text:"**TABS** changed Status from OPEN to FAILED of Payment pi_8Hs2kQ1m", agent:false },
+    { kind:"update_contacts", cat:"ai",     date:"Jun 5, 2026",  time:"11:25 AM", text:"**Collections Agent** set primary billing contact to ap@northwindtraders.com", agent:true },
   ],
   scheduled: [
     { type:"agent_task", id:"nw_st1", date:"Jun 12, 2026", time:"9:00 AM",
       prompt:"Check if INV-3102 has been paid following the resend. If not, send a follow-up." },
-  ],
-  // Both proposed actions cite the same email — the point of this scenario.
-  newEvents: [
-    { type:"email", id:"nw_e2" },
   ],
   proposed: [
     { kind:"update_contacts", desc:"Update primary billing contact → ap@northwindtraders.com", editableContact:"ap@northwindtraders.com",
@@ -474,12 +498,138 @@ const SCENARIO_NORTHWIND = {
   initialActionState: { 0: "auto" },
 };
 
+// Fairmont Logistics — demo scenario: 2 unrelated emails, 2 proposed actions, each citing its
+// own separate event (no shared cause, unlike Northwind/Cobalt Fitness — see decision #1).
+const THREADS_FAIRMONT = [
+  // Thread 1 (event A): a contact-change request, unrelated in topic and time to thread 2.
+  { id:"fm_t1", subject:"Billing contact update",
+    emails:[
+      { id:"fm_a1", dir:"in", entity:"customer",
+        from:{name:"Maria Lopez",email:"ap@fairmontlogistics.com"},
+        to:[{name:"Priya Sharma",email:"billing@generalcatalyst.com",badge:null}], cc:[],
+        date:"Jun 1, 2026", time:"9:40 AM",
+        body:"Hi,\n\nQuick note — our AP lead changed. Please route billing to newap@fairmontlogistics.com going forward.\n\nThanks,\nMaria",
+        attachments:[], badges:[] },
+    ],
+  },
+  // Thread 2 (event B): a separate, self-contained resend request — different topic, different day.
+  { id:"fm_t2", subject:"Resend INV-7688",
+    emails:[
+      { id:"fm_b1", dir:"in", entity:"customer",
+        from:{name:"Maria Lopez",email:"ap@fairmontlogistics.com"},
+        to:[{name:"Priya Sharma",email:"billing@generalcatalyst.com",badge:null}], cc:[],
+        date:"Jun 3, 2026", time:"1:15 PM",
+        body:"Hi,\n\nCould you resend a copy of INV-7688? We can't locate it on our end and need it for our records.\n\nThanks,\nMaria",
+        attachments:[], badges:[] },
+    ],
+    agentReplyDraft:"Hi Maria,\n\nHappy to help — a fresh copy of INV-7688 is attached.\n\nLet me know if there's anything else you need.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
+  },
+];
+
+const SCENARIO_FAIRMONT = {
+  customer: "Fairmont Logistics",
+  agentSummary: [
+    "Maria Lopez sent two separate, unrelated asks: update the billing contact to **newap@fairmontlogistics.com**, and resend a copy of INV-7688.",
+    "Neither touches the other invoices on the account, and INV-7688 is already paid; there's nothing to reconcile.",
+    "Both replies are routine: a contact change and a resend, nothing else.",
+  ],
+  invoices: [
+    { num:"INV-7710", due:"Jun 10, 2026", amount:6400, od:6, status:"Overdue" },
+    { num:"INV-7688", due:"Apr 15, 2026", amount:1200, od:0, status:"Paid" },
+  ],
+  events: [],
+  scheduled: [
+    { type:"agent_task", id:"fm_st1", date:"Jun 18, 2026", time:"9:00 AM",
+      prompt:"Check whether INV-7710 has been paid. If not, send a follow-up." },
+  ],
+  proposed: [
+    // Action 1 — cites A only.
+    { kind:"update_contacts", desc:"Update primary billing contact → newap@fairmontlogistics.com", editableContact:"newap@fairmontlogistics.com",
+      cause:{ type:"email", id:"fm_a1" } },
+    // Action 2 — cites B only.
+    { kind:"send_email", desc:"Reply to Maria Lopez with resent INV-7688", invoice:"INV-7688",
+      cause:{ type:"email", id:"fm_b1" },
+      attachments:[{name:"INV-7688.pdf"}],
+      draft:{ to:"ap@fairmontlogistics.com", subject:"Re: Resend INV-7688",
+        body:"Hi Maria,\n\nHappy to help — a fresh copy of INV-7688 is attached.\n\nLet me know if there's anything else you need.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
+        attachments:[{name:"INV-7688.pdf"}] },
+    },
+  ],
+};
+
+// Cobalt Fitness — demo scenario: ONE inbound email triggers all 7 July-28-scoped agent action
+// types at once (Build plan doc: mark invoice pending, update PO, update customer info, send
+// email, flag customer, apply cash app recommendation, schedule task). All 7 share the same
+// cause, so they nest under a single event node — the same "shared cause" grouping Northwind
+// demonstrates with 2, stress-tested here with the full inventory.
+const THREADS_COBALT = [
+  { id:"cf_t1", subject:"Invoice 5520 — a few things at once",
+    emails:[
+      { id:"cf_e1", dir:"out", entity:"system", entityLabel:"Invoice Sent",
+        from:{name:"Invoice Sent",email:"billing@generalcatalyst.com"},
+        to:[{name:"Renee Ibarra",email:"ap@cobaltfitness.com",badge:"opened"}], cc:[],
+        date:"Jun 5, 2026", time:"9:00 AM",
+        body:"Hi Cobalt Fitness,\n\nYour invoice INV-5520 for $9,000 is attached. Payment is due Jun 20, 2026.\n\nThanks,\nGeneral Catalyst",
+        attachments:[{name:"INV-5520.pdf",type:"PDF"}], badges:["opened"] },
+      // The one trigger email — all 7 proposed actions below cite this same email as cause.
+      { id:"cf_e2", dir:"in", entity:"customer",
+        from:{name:"Renee Ibarra",email:"ap@cobaltfitness.com"},
+        to:[{name:"Priya Sharma",email:"billing@generalcatalyst.com",badge:null}], cc:[],
+        date:"Jun 12, 2026", time:"3:40 PM",
+        body:"Hi team, a few things:\n\n1) Please hold INV-5520 while we sort out a partial payment we sent last week — we'd rather not get more reminders in the meantime.\n2) It should also show PO# CF-4471 going forward.\n3) Our new AP contact is Marcus Yee (marcus.yee@cobaltfitness.com) — please make him the primary contact and keep me CC'd, and update our billing address to 900 Harbor Blvd, Suite 220, Long Beach, CA 90802.\n4) We sent $2,000 via wire on Jun 10 toward INV-5520, ref WIRE-88213 — can you confirm that's applied?\n5) Also just flagging that we've had three billing contact changes in two months and would like someone keeping an eye on this account.\n6) Could you check back with us in 3 weeks to make sure everything's settled?\n7) And could you send over a copy of our current contract for our files?\n\nThanks,\nRenee",
+        attachments:[], badges:[] },
+    ],
+    agentReplyDraft:"Hi Renee,\n\nThanks for all of this — here's where things stand:\n\n- INV-5520 is on hold while the remaining balance is confirmed.\n- PO# CF-4471 is now on the invoice.\n- Marcus Yee is the new primary contact (you're still CC'd), and the billing address is updated to 900 Harbor Blvd, Suite 220, Long Beach, CA 90802.\n- The $2,000 wire (ref WIRE-88213) is matched and applied.\n- We'll check back in with you in 3 weeks.\n- The current contract is attached for your files.\n\nLet me know if anything looks off.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
+  },
+];
+
+const SCENARIO_COBALT = {
+  customer: "Cobalt Fitness",
+  agentSummary: [
+    "Renee Ibarra sent one email covering seven separate asks: hold the invoice, add a PO, change the primary contact and address, confirm a wire payment, flag the account, schedule a check-in, and send the contract.",
+    "INV-5520 (**$9,000**) has a **$2,000** wire already sent (ref WIRE-88213) against it; the account has had 3 billing-contact changes in 2 months, which is what prompted the flag request.",
+    "Every action here is exactly what Renee asked for, in order: nothing is being inferred or extended beyond her list.",
+  ],
+  invoices: [
+    { num:"INV-5520", due:"Jun 20, 2026", amount:9000, od:0, status:"Sent" },
+    { num:"INV-5521", due:"Jul 5, 2026",  amount:4200, od:0, status:"Sent" },
+  ],
+  events: [],
+  scheduled: [],
+  proposed: [
+    { kind:"mark_pending", desc:"Mark INV-5520 as pending while the remaining balance is confirmed",
+      cause:{ type:"email", id:"cf_e2" } },
+    { kind:"update_po", desc:"Add PO# CF-4471 to INV-5520",
+      cause:{ type:"email", id:"cf_e2" } },
+    // Not the dedicated update_contacts card (that branch only shows a single editable value,
+    // no room for the CC + address changes too) — a distinct kind so it hits the generic card
+    // and shows the full desc instead of silently dropping everything but the primary contact.
+    { kind:"update_customer_info", desc:"Set primary billing contact → Marcus Yee, marcus.yee@cobaltfitness.com (keep Renee Ibarra CC'd), update billing address → 900 Harbor Blvd, Suite 220, Long Beach, CA 90802",
+      cause:{ type:"email", id:"cf_e2" } },
+    { kind:"apply_cash_app", desc:"Apply the $2,000 wire (ref WIRE-88213, Jun 10) to INV-5520",
+      cause:{ type:"email", id:"cf_e2" } },
+    { kind:"flag_customer", desc:"Flag customer: 3 billing-contact changes in 2 months, customer asked for extra attention on the account",
+      cause:{ type:"email", id:"cf_e2" } },
+    { kind:"schedule_task", desc:"Schedule a check-in in 3 weeks to confirm the account is settled",
+      cause:{ type:"email", id:"cf_e2" } },
+    { kind:"send_email", desc:"Reply to Renee Ibarra confirming all of the above, with the current contract attached", invoice:"INV-5520",
+      cause:{ type:"email", id:"cf_e2" },
+      attachments:[{name:"Contract_CobaltFitness_2026.pdf"}],
+      draft:{ to:"ap@cobaltfitness.com", cc:"marcus.yee@cobaltfitness.com", subject:"Re: Invoice 5520 — a few things at once",
+        body:"Hi Renee,\n\nThanks for all of this — here's where things stand:\n\n- INV-5520 is on hold while the remaining balance is confirmed.\n- PO# CF-4471 is now on the invoice.\n- Marcus Yee is the new primary contact (you're still CC'd), and the billing address is updated to 900 Harbor Blvd, Suite 220, Long Beach, CA 90802.\n- The $2,000 wire (ref WIRE-88213) is matched and applied.\n- We'll check back in with you in 3 weeks.\n- The current contract is attached for your files.\n\nLet me know if anything looks off.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
+        attachments:[{name:"Contract_CobaltFitness_2026.pdf"}] },
+    },
+  ],
+};
+
 // Mutable — reassigned on navigation into a customer's detail page. Default = Meridian.
 let SCENARIO = SCENARIO_MERIDIAN;
 let THREADS = THREADS_MERIDIAN;
 const SCENARIOS_BY_ID = {
   meridian:  { scenario: SCENARIO_MERIDIAN,  threads: THREADS_MERIDIAN },
   northwind: { scenario: SCENARIO_NORTHWIND, threads: THREADS_NORTHWIND },
+  fairmont:  { scenario: SCENARIO_FAIRMONT,  threads: THREADS_FAIRMONT },
+  cobalt:    { scenario: SCENARIO_COBALT,    threads: THREADS_COBALT },
 };
 
 // ============================================================
@@ -947,9 +1097,10 @@ function openDraftEditorInDrawer(actionIdx){
   expandedCard = null;
   drawerEditActionIdx = actionIdx;
   let threadId = (THREADS[0] && THREADS[0].id) || "t1", focus = null;
-  if(a && a.cause && a.cause.type==="email"){
-    const t = THREADS.find(t=>t.emails.some(e=>e.id===a.cause.id));
-    if(t){ threadId = t.id; focus = a.cause.id; }
+  const emailCause = (a ? causesOf(a) : []).find(c=>c.type==="email");
+  if(emailCause){
+    const t = THREADS.find(t=>t.emails.some(e=>e.id===emailCause.id));
+    if(t){ threadId = t.id; focus = emailCause.id; }
   }
   openThreadDrawer(threadId, focus, true);
   // Deep-link straight into the draft input, not just the thread — no hunting for it.
@@ -1483,6 +1634,18 @@ function verdictHtml(st, extraStyle){
   return `<span class="verdict ${cls}"${extraStyle?` style="${extraStyle}"`:""}>${label}</span>`;
 }
 
+// Human-readable titles for generic (non-email, non-contact) proposed-action kinds — the July
+// 28 action inventory (Build plan doc): mark pending, update PO, flag customer, apply cash app,
+// schedule task. send_email/update_contacts have their own dedicated card branches below.
+const ACTION_TITLES = {
+  mark_pending:        "Mark invoice pending",
+  update_po:           "Update PO number",
+  update_customer_info:"Update customer info",
+  flag_customer:       "Flag customer",
+  apply_cash_app:      "Apply cash app recommendation",
+  schedule_task:       "Schedule task",
+};
+
 // One proposed action card (right/effect side). Reused for email / contact / generic.
 function renderActionCard(a, i){
   const st = actionState[i];
@@ -1545,29 +1708,25 @@ function renderActionCard(a, i){
     : `<button class="btn btn-danger" data-rej="${i}"><span class="ic">${ICON.x}</span>Reject</button><button class="btn btn-primary" data-app="${i}"><span class="ic">${ICON.check}</span>Approve</button>`;
   return `<div class="card ${st?"done":""}" style="flex-direction:column;align-items:stretch">
     <div style="display:flex;align-items:center;gap:16px">
-      <div class="body" style="flex:1"><span class="title">${esc(a.kind)}</span><span class="desc">${esc(a.desc)}</span></div>
+      <div class="body" style="flex:1"><span class="title">${esc(ACTION_TITLES[a.kind]||a.kind)}</span><span class="desc">${esc(a.desc)}</span></div>
       <div class="acts">${acts}</div>
     </div>
   </div>`;
 }
 
-// One timeline node: an inline "what happened" event, with its suggested action nested beneath.
-function renderTimelineNode(o){
+// An action cites exactly one triggering event — never more than one (a real proposed action
+// only ever fires off a single trigger; see CLAUDE.md decision #1). Wrapped in an array purely
+// so callers have one shape to iterate, not because more than one is ever valid.
+function causesOf(a){ return a && a.cause ? [a.cause] : []; }
+
+// The one triggering email, as cited by a proposed action's `cause` (looked up in THREADS).
+function renderCauseBlock(cause){
   const mail = LU('<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>');
-  const alert = LU('<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>');
-  let dotCls = "", eventHtml = "";
-  if(o.event){
-    dotCls = "critical";
-    eventHtml = `<div class="tl-event">
-      <span class="tl-ev-icon crit">${alert}</span>
-      <span class="tl-ev-text strong">${o.event.html||esc(o.event.text||"")}</span>
-      <span class="tl-time">${esc(o.event.date)} · ${esc(o.event.time||"")}</span>
-    </div>`;
-  } else if(o.cause && o.cause.type==="email"){
-    const em = THREADS.flatMap(t=>t.emails).find(e=>e.id===o.cause.id);
+  if(cause && cause.type==="email"){
+    const em = THREADS.flatMap(t=>t.emails).find(e=>e.id===cause.id);
     const preview = em ? em.body.replace(/\s+/g," ").trim() : "";
     const time = em ? (em.time||"") : "";
-    eventHtml = `<div class="tl-event email" data-open-email-drawer="${em?em.id:""}">
+    return `<div class="tl-event email" data-open-email-drawer="${em?em.id:""}">
       <span class="tl-ev-icon">${mail}</span>
       <div class="tl-ev-main">
         <div class="tl-ev-top">
@@ -1578,14 +1737,18 @@ function renderTimelineNode(o){
         <div class="tl-ev-text">${esc(preview)}</div>
       </div>
     </div>`;
-  } else {
-    eventHtml = `<div class="tl-event"><span class="tl-ev-text">Agent-initiated</span></div>`;
   }
+  return `<div class="tl-event"><span class="tl-ev-text">Agent-initiated</span></div>`;
+}
+
+// One timeline node: the event that triggered it, with the suggested action(s) nested beneath.
+function renderTimelineNode(o){
+  const eventHtml = renderCauseBlock(o.cause||null);
   // o.actions is a list of {action, idx} sharing this exact cause — stacked together under
-  // the one event instead of repeating the event once per action.
+  // the one event instead of repeating it once per action.
   const actionHtml = (o.actions||[]).map(({action,idx})=>`<div class="tl-action">${renderActionCard(action,idx)}</div>`).join("");
   return `<div class="tl-node">
-    <span class="tl-dot ${dotCls}"></span>
+    <span class="tl-dot"></span>
     <div class="tl-node-main">${eventHtml}${actionHtml}</div>
   </div>`;
 }
@@ -1601,10 +1764,11 @@ function renderActionsPanel(){
   if(!p.length){
     content = `<div class="empty">No actions pending.</div>`;
   } else {
-    // Decision: the agent cites a single event per action it proposes — no orphan events.
-    // An event only ever shows here if a proposed action is actually tied to it (via cause).
-    // When two+ actions share the exact same cause, group them under one copy of that event
-    // instead of repeating the event once per action.
+    // Decision: the agent cites a single event per action it proposes — no orphan events, and
+    // no action ever cites more than one. An event only ever shows here if a proposed action is
+    // actually tied to it (via cause). When two or more actions share the *exact same* cause,
+    // they're grouped under one copy of that event instead of repeating it (Northwind/Meridian/
+    // Cobalt Fitness — several actions, one shared email).
     const groups = [];
     const groupByKey = new Map();
     p.forEach((a,i)=>{
@@ -1638,13 +1802,6 @@ function renderActionsPanel(){
 
 // Filter buckets. "agent" cuts across both emails and events — anything Collections Agent
 // touched, auto-executed or human-approved. Rejected proposals never appear here at all.
-// Invoice chip for an email row — the INV-#### pulled from its thread subject, so you can see
-// at a glance which invoice a message is tied to (full subject on hover).
-function invoiceTag(subject){
-  const m = subject && subject.match(/INV-\d+/i);
-  return m ? `<span class="inv-tag-chip" title="${esc(subject)}">${esc(m[0].toUpperCase())}</span>` : "";
-}
-
 function renderActivityBody(){
   const mail = LU('<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>');
   const items = activityItems().filter(item => activityFilter==="email" ? item.type==="email" : true);
@@ -1660,13 +1817,12 @@ function renderActivityBody(){
       const preview = item.body.replace(/\s+/g," ").trim();
       const badges = (item.badges||[]).map(b=>engBadge(b)).join("");
       const draftBadge = (thread&&thread.agentReplyDraft&&item.id===thread.emails[thread.emails.length-1].id) ? `<span class="draft-badge">✎ Agent draft</span>` : "";
-      const invTag = invoiceTag((thread&&thread.subject) || item.threadSubject || item.subject);
       const stacked = (count>1) ? `<div class="email-stack" data-open-thread="${tid}" data-focus-email="${item.id}">View thread (${count}) →</div>` : "";
       return `<div class="act-row email-row${count>1?" has-thread-link":""}" data-open-thread="${tid}" data-focus-email="${item.id}">
         <span class="er-icon">${mail}</span>
         <div class="er-main">
           <div class="email-row-top">
-            <span class="email-row-who">${esc(item.from.name)}</span>${invTag}${draftBadge}
+            <span class="email-row-who">${esc(item.from.name)}</span>${draftBadge}
             <span class="email-row-date">${esc(item.date)} · ${esc(item.time||"")}</span>
           </div>
           <div class="email-row-body">${esc(preview)}</div>
@@ -1675,18 +1831,14 @@ function renderActivityBody(){
         </div>
       </div>`;
     }
-    // Actor attribution follows the real Tabs activity-log pattern: bold plain text inline
-    // ("**Agent Actions** set PO 12345..."), not a pill. Only agent-driven events get an
-    // actor prefix at all — a manual human action (e.g. escalated, agent:false) stays plain,
-    // which is how we distinguish "agent did it" from "human did it directly" without a
-    // separate filter bucket.
-    const actorPrefix = item.agent ? `<strong>Collections Agent:</strong> ` : "";
-    const suffix = item.agent
-      ? (item.cat==="ai" ? ` <span class="act-auto">· Auto</span>` : item.cat==="user" ? ` <span class="act-approved">· Approved</span>` : "")
-      : "";
+    // Actor attribution matches the real PRD Activity Log spec's own examples verbatim:
+    // the actor (TABS / Priya Sharma / Collections Agent) is bolded inline as part of the
+    // entry text itself ("**Collections Agent** set PO 12345 on INV-2241"), not appended by
+    // this renderer — every event's `text` already names who did it. No separate prefix or
+    // "· Auto"/"· Approved" suffix on top of that (see decision #2).
     return `<div class="act-row event-row">
       <span class="ev-node"></span>
-      <span class="ar-body">${actorPrefix}${item.html||esc(item.text||"")}${suffix}</span>
+      <span class="ar-body">${item.html||mdInline(esc(item.text||""))}</span>
       <span class="ar-datestamp">${esc(item.date)} · ${esc(item.time||"")}</span>
     </div>`;
   }).join("");

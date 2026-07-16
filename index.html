@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Collections Agent — v6</title>
+<title>Collections - July</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -425,7 +425,6 @@
   .tl-node{position:relative;padding-left:30px;padding-bottom:20px;}
   .tl-node:last-child{padding-bottom:0;}
   .tl-dot{position:absolute;left:0;top:3px;width:14px;height:14px;border-radius:50%;background:var(--bg);border:2px solid var(--n300);box-sizing:border-box;z-index:1;}
-  .tl-dot.critical{border-color:var(--critical);background:var(--critical-surface);}
   .tl-event{display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--ink);min-height:20px;}
   .tl-ev-icon{width:16px;height:16px;flex:0 0 16px;color:var(--helper);display:flex;margin-top:2px;}
   .tl-ev-icon.crit{color:var(--critical);}
@@ -614,8 +613,6 @@
   .er-main{flex:1;min-width:0;}
   .email-row-top{display:flex;align-items:center;gap:8px;}
   .email-row-who{font-size:13.5px;font-weight:700;}
-  /* invoice tag on an email row — shows which invoice the message is tied to */
-  .inv-tag-chip{display:inline-flex;align-items:center;font-size:10.5px;font-weight:600;color:var(--n600);background:var(--n100);border-radius:5px;padding:1px 6px;letter-spacing:.02em;font-family:"Geist Mono",ui-monospace,monospace;}
   .email-row-date{font-size:11.5px;color:var(--helper);margin-left:auto;white-space:nowrap;}
   .email-row-body{font-size:13px;color:var(--helper);margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
   .email-row-foot{display:flex;align-items:center;gap:6px;margin-top:6px;}
@@ -623,9 +620,6 @@
   .email-stack{position:absolute;right:14px;bottom:11px;font-size:11.5px;font-weight:600;color:var(--blue);cursor:pointer;background:none;border:none;box-shadow:none;padding:0;margin:0;}
   .email-stack:hover{text-decoration:underline;}
   .act-body{max-width:1000px;}
-  /* Auto vs. approved — plain colored text at the end of the line, not a pill. */
-  .act-auto{color:var(--positive);font-weight:600;}
-  .act-approved{color:var(--hi-200);font-weight:600;}
   /* event rows sit directly on the continuous .act-list rail — solid actor-colored node
      with a white halo so it reads cleanly over the line. */
   .act-row.event-row{display:flex;align-items:center;gap:12px;position:relative;padding:14px 0 14px 44px;}
