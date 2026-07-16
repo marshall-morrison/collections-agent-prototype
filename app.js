@@ -42,17 +42,29 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function mdToHtml(t){ return t.trim().split(/\n\n+/).map(p=>`<p>${p.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,' ')}</p>`).join(''); }
 function mdInline(t){ return t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>'); }
-// Flat bullets, not broken-out sections. Always exactly 3, one per fixed slot, in order:
+// Flat bullets, not broken-out sections. Always 3 fixed slots, in order, but "Key facts" may
+// be 1 or 2 bullets (so the list is 3-4 bullets total, never more, never fewer):
 //   1. Trigger     - what the customer actually asked/said (deterministic; not "summarized," just stated)
-//   2. Key facts   - the narrow scoped facts a reviewer needs: invoice amount/overdue state, plus
-//                    any other fact load-bearing enough to change the read (e.g. an action already auto-executed)
+//   2. Key facts (1-2) - the narrow scoped facts a reviewer needs: invoice amount/overdue state, plus
+//                    any other fact load-bearing enough to change the read (e.g. an action already auto-executed).
+//                    Split into two bullets rather than cramming when there are two genuinely separate facts.
 //   3. Recommendation - why approving the proposed action(s) is safe, or what's actually being asked
 //                    for when it isn't (a dispute) - the "click Approve" close
-// No conditional 4th "flag" bullet: escalation already has a real control (the Flag button, decision #8) -
-// a text bullet restating "this is escalated" would just duplicate a decision the UI already surfaces.
-const AS_SLOTS = ["Trigger","Key facts","Recommendation"];
+// No conditional 4th "flag" bullet for escalation: that already has a real control (the Flag button,
+// decision #8) - a text bullet restating "this is escalated" would just duplicate a decision the UI
+// already surfaces. The only reason the count varies is a second Key facts bullet.
+// Slot is derived from position, not a parallel array: first = Trigger, last = Recommendation,
+// everything between is Key facts - so this keeps working whether agentSummary has 3 or 4 items.
+// Label only prints on the first bullet of a slot - a second Key facts bullet doesn't repeat the caption.
 function renderAgentSummary(s){
-  const items = s.agentSummary.map((b,i)=>`<li>${mdInline(b)}<span class="as-slot">${AS_SLOTS[i]||""}</span></li>`).join("");
+  const n = s.agentSummary.length;
+  let prevSlot = null;
+  const items = s.agentSummary.map((b,i)=>{
+    const slot = i===0 ? "Trigger" : (i===n-1 ? "Recommendation" : "Key facts");
+    const label = slot===prevSlot ? "" : `<span class="as-slot">${slot}</span>`;
+    prevSlot = slot;
+    return `<li>${label}<div class="as-line">${mdInline(b)}</div></li>`;
+  }).join("");
   return `<ul class="as-bullets">${items}</ul>`;
 }
 function entityClass(e){ return {customer:"customer",system:"system",dunning:"system",agent:"agent",merchant:"merchant"}[e]||"system"; }
@@ -422,7 +434,8 @@ const SCENARIO_NORTHWIND = {
   customer: "Northwind Traders",
   agentSummary: [
     "Tom Reilly asked to update the billing contact to **ap@northwindtraders.com** and resend INV-3102, which he can't locate; no dispute, just a routine ask.",
-    "The contact update already auto-executed per policy. INV-3102 (**$28,100**), 35 days overdue, is the oldest and largest of Northwind's 3 open invoices.",
+    "The contact update already auto-executed per policy.",
+    "INV-3102 (**$28,100**), 35 days overdue, is the oldest and largest of Northwind's 3 open invoices.",
     "Only the reply with the resent invoice needs your review; approving it clears Tom's blocker without changing anything else on the account.",
   ],
   invoices: [
