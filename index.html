@@ -612,7 +612,10 @@
   .er-icon svg{width:18px;height:18px;}
   .er-main{flex:1;min-width:0;}
   .email-row-top{display:flex;align-items:center;gap:8px;}
-  .email-row-who{font-size:13.5px;font-weight:700;}
+  .email-row-who{font-size:13.5px;font-weight:700;flex-shrink:0;}
+  /* thread subject — its own tone (lighter than the body preview's --helper) plus italic, so
+     sender / subject / body preview all read as three distinct things at a glance. */
+  .email-row-subject{flex:1;min-width:0;font-size:12px;font-weight:400;font-style:italic;color:var(--n400);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .email-row-date{font-size:11.5px;color:var(--helper);margin-left:auto;white-space:nowrap;}
   .email-row-body{font-size:13px;color:var(--helper);margin-top:3px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
   .email-row-foot{display:flex;align-items:center;gap:6px;margin-top:6px;}

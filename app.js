@@ -1822,7 +1822,8 @@ function renderActivityBody(){
         <span class="er-icon">${mail}</span>
         <div class="er-main">
           <div class="email-row-top">
-            <span class="email-row-who">${esc(item.from.name)}</span>${draftBadge}
+            <span class="email-row-who">${esc(item.from.name)}</span>
+            <span class="email-row-subject">${esc(thread?thread.subject:"")}</span>${draftBadge}
             <span class="email-row-date">${esc(item.date)} · ${esc(item.time||"")}</span>
           </div>
           <div class="email-row-body">${esc(preview)}</div>
