@@ -451,9 +451,6 @@
   .email-scrim.open{opacity:1;pointer-events:auto;}
   .email-drawer{position:fixed;top:0;right:0;width:560px;max-width:94vw;height:100vh;background:#fff;transform:translateX(100%);transition:transform .22s ease,box-shadow .22s ease;z-index:120;display:flex;flex-direction:column;overflow:hidden;}
   .email-drawer.open{transform:translateX(0);box-shadow:-6px 0 28px rgba(0,0,0,.18);}
-  .email-drawer.resizing{transition:none;}
-  .drawer-resize-handle{position:absolute;top:0;left:-3px;bottom:0;width:6px;cursor:ew-resize;z-index:5;}
-  .drawer-resize-handle:hover,.drawer-resize-handle.dragging{background:rgba(36,118,216,.25);}
   .ed-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line);}
   .ed-subject{flex:1;font-size:15px;font-weight:700;color:var(--ink);}
   .ed-close{width:30px;height:30px;border:none;background:transparent;color:var(--helper);font-size:22px;line-height:1;cursor:pointer;border-radius:8px;display:flex;align-items:center;justify-content:center;}
@@ -776,11 +773,6 @@
   .email-pill{display:inline-flex;align-items:center;gap:4px;background:#e8e8e4;border-radius:8px;padding:2px 10px 2px 10px;font-size:12.5px;color:var(--ink);}
   .email-pill .ep-rm{color:#9a9a95;cursor:pointer;font-size:11px;margin-left:2px;}
   .recip-input{border:none;outline:none;font-size:13px;font-family:inherit;min-width:80px;background:transparent;color:var(--ink);}
-  /* subject */
-  .subject-field{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line2);}
-  .subject-label{flex:0 0 28px;font-size:12px;font-weight:600;color:var(--helper);}
-  .subject-input{flex:1;border:none;outline:none;font-size:13px;font-family:inherit;color:var(--ink);}
-  .subject-input.greyed{color:var(--helper);cursor:not-allowed;pointer-events:none;}
   /* body */
   .draft-body-area{width:100%;border:none;border-bottom:1px solid var(--line2);padding:10px 0;font-size:13px;font-family:inherit;line-height:1.6;resize:none;min-height:192px;outline:none;background:transparent;margin-top:6px;}
   .draft-tiny{display:flex;gap:12px;font-size:12px;color:var(--helper);justify-content:flex-end;padding:5px 0;}
@@ -845,11 +837,11 @@
   .cmp-control{flex:1;min-width:0;border:1px solid var(--border);border-radius:8px;padding:6px 8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:36px;}
   .cmp-control:focus-within{border-color:var(--hi-100);box-shadow:0 0 0 3px rgba(96,197,217,.15);}
   .recip-input{border:none;outline:none;font-size:13px;font-family:inherit;min-width:90px;flex:1;background:transparent;color:var(--ink);}
-  .cmp-subject{border:none;outline:none;width:100%;font-size:13px;font-family:inherit;color:var(--ink);background:transparent;}
-  .cmp-subject.greyed{color:var(--helper);}
   .email-pill{display:inline-flex;align-items:center;gap:6px;background:var(--n100);border-radius:6px;padding:3px 8px;font-size:12.5px;color:var(--ink);}
   .email-pill .ep-rm{color:var(--n400);cursor:pointer;font-size:13px;line-height:1;}
   .email-pill .ep-rm:hover{color:var(--critical);}
+  /* the rest of the To/Cc recipients, folded into a passive count instead of a separate Cc row */
+  .recip-more{display:inline-flex;align-items:center;font-size:11.5px;font-weight:600;color:var(--helper);background:var(--n50);border:1px solid var(--border);border-radius:10px;padding:2px 7px;cursor:default;}
   .cmp-editor{border:1px solid var(--border);border-radius:8px;overflow:hidden;}
   .cmp-editor:focus-within{border-color:var(--hi-100);}
   .cmp-body{width:100%;border:none;outline:none;padding:12px;font-size:13px;font-family:inherit;line-height:1.6;resize:vertical;min-height:168px;background:transparent;color:var(--ink);}

@@ -1171,34 +1171,6 @@ function renderDeliveryDetails(em){
     </div>
   </div>`;
 }
-// Drawer resize — set up once, via delegation, so it survives every re-render of #emailDrawer's
-// innerHTML (the handle itself is re-inserted into that markup on each render).
-(function setupDrawerResize(){
-  let dragging = false;
-  document.addEventListener("mousedown", (e)=>{
-    const handle = e.target.closest && e.target.closest(".drawer-resize-handle");
-    if(!handle) return;
-    dragging = true;
-    handle.classList.add("dragging");
-    const drawer = $("emailDrawer"); if(drawer) drawer.classList.add("resizing");
-    document.body.style.userSelect = "none";
-    e.preventDefault();
-  });
-  document.addEventListener("mousemove", (e)=>{
-    if(!dragging) return;
-    const drawer = $("emailDrawer"); if(!drawer) return;
-    const newWidth = Math.min(Math.max(window.innerWidth - e.clientX, 420), Math.round(window.innerWidth*0.94));
-    drawer.style.width = newWidth + "px";
-  });
-  document.addEventListener("mouseup", ()=>{
-    if(!dragging) return;
-    dragging = false;
-    document.body.style.userSelect = "";
-    document.querySelectorAll(".drawer-resize-handle.dragging").forEach(h=>h.classList.remove("dragging"));
-    const drawer = $("emailDrawer"); if(drawer) drawer.classList.remove("resizing");
-  });
-})();
-
 function renderEmailDrawer(){
   const drawer = $("emailDrawer"), scrim = $("emailScrim");
   if(!drawer) return;
@@ -1259,7 +1231,6 @@ function renderEmailDrawer(){
   }
 
   drawer.innerHTML = `
-    <div class="drawer-resize-handle" title="Drag to resize"></div>
     <div class="ed-head">
       <span class="ed-subject">${esc(thread.subject)} <span class="ed-count">${sorted.length} message${sorted.length>1?"s":""}</span></span>
       <button class="ed-close" id="emailDrawerClose" title="Close">×</button>
@@ -1508,13 +1479,16 @@ function renderDraftEditor(draft, actionIdx, opts){
   const threadLink = isThread && actionIdx !== "reply" && !opts.inDrawer
     ? `<span class="cmp-threadlink" data-open-thread="t1">View thread →</span>` : "";
 
-  // recipient pill rows
-  const pillsHtml = (list, field) => list.map(e=>
-    `<span class="email-pill">${esc(e)}<span class="ep-rm" data-rm-pill="${actionIdx}:${field}:${esc(e)}">×</span></span>`
-  ).join("") + `<input class="recip-input" placeholder="" data-pill-input="${actionIdx}:${field}">`;
-
-  const subjectClass = isThread ? "subject-input greyed" : "subject-input";
-  const subjectTitle = isThread ? 'title="Subject locked for thread replies"' : "";
+  // To shows just the primary recipient plus a "+N" count for everyone else on the
+  // message (remaining To's and all Cc's folded together) — no separate Cc row, and the
+  // overflow isn't individually editable here, just a passive summary (hover for who).
+  const toPrimary = pills.to[0];
+  const toOverflow = [...pills.to.slice(1), ...pills.cc];
+  const toFieldHtml = (toPrimary
+      ? `<span class="email-pill">${esc(toPrimary)}<span class="ep-rm" data-rm-pill="${actionIdx}:to:${esc(toPrimary)}">×</span></span>`
+      : "")
+    + (toOverflow.length ? `<span class="recip-more" title="${esc(toOverflow.join(", "))}">+${toOverflow.length}</span>` : "")
+    + `<input class="recip-input" placeholder="" data-pill-input="${actionIdx}:to">`;
 
   const attachPillsHtml = [...selAttach].map(name=>
     `<span class="attach-pill-tag" onclick="window.open('#','_blank')">📎 ${esc(name.split('/').pop())} <span class="ap-rm" data-rm-attach="${actionIdx}:${esc(name)}">×</span></span>`
@@ -1533,9 +1507,7 @@ function renderDraftEditor(draft, actionIdx, opts){
 
   return `<div class="composer">
     ${threadLink}
-    <div class="cmp-field"><span class="cmp-label">To</span><div class="cmp-control">${pillsHtml(pills.to,"to")}</div></div>
-    <div class="cmp-field"><span class="cmp-label">Cc</span><div class="cmp-control">${pillsHtml(pills.cc,"cc")}</div></div>
-    <div class="cmp-field"><span class="cmp-label">Subject</span><div class="cmp-control"><input class="${subjectClass}" value="${esc(draft.subject||"")}" ${subjectTitle}${isThread?" readonly":""}></div></div>
+    <div class="cmp-field"><span class="cmp-label">To</span><div class="cmp-control">${toFieldHtml}</div></div>
     <div class="cmp-editor">
       <textarea class="cmp-body">${esc(draft.body||"")}</textarea>
     </div>
