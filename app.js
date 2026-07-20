@@ -176,7 +176,7 @@ const WORKLIST_REAL = [
 // Deterministic (index-derived), not Math.random(), so the table looks the same on every reload.
 const DUMMY_NAMES = ["Alderin","Brightwell","Cascade","Driftwood","Emberly","Fenwick","Granite","Hollow Creek","Ironclad","Juniper","Kestrel","Lattice","Meadowlark","Norwood","Oakmont","Pinegrove","Quarrystone","Ridgeline","Sablewood","Thistledown","Underhill","Vantage","Westmere","Yarrow","Zephyr","Amberfield","Birchgate","Copperline","Elmsworth","Foxglove"];
 const DUMMY_SUFFIXES = ["Inc.","LLC","Group","Partners","Holdings","Co.","& Sons","Industries","Ventures","Supply Co."];
-const DUMMY_STATUSES = ["review","executed","rejected"];
+const DUMMY_STATUSES = ["review","executed","rejected","failed"];
 const DUMMY_EVENTS = [
   "Customer requested an updated copy of their invoice",
   "Payment attempt failed due to insufficient funds",
@@ -216,9 +216,8 @@ function makeDummyRow(i){
 const WORKLIST_DUMMY = Array.from({ length: 300 }, (_, i) => makeDummyRow(i));
 const WORKLIST = [...WORKLIST_REAL, ...WORKLIST_DUMMY];
 
-// Collections Agent worklist column config. "customer", "status" and "overdue" are pinned
-// (always shown, not listed in the Configure columns picker); everything else is toggleable —
-// visibleInboxCols below controls which of those render. Order here is display order.
+// Collections Agent worklist column config. All columns always show — there's no picker to
+// hide any of them. Order here is display order.
 const INBOX_COLUMNS = [
   { key:"customer", label:"Customer", pinned:true },
   { key:"status", label:"Status", pinned:true },
@@ -232,46 +231,61 @@ const INBOX_COLUMNS = [
 
 // Worklist "Add filter" definitions — each maps to a predicate over a row. "Flag" (formerly
 // "Escalate") reads the same `escalated` field as the detail-page flag control.
+// Two filter shapes, matching the real Add-filter pattern:
+// - "categorical": a checkbox list, multi-select (Status, Flag, Paused).
+// - "numeric": an operator radio (Equal to / Greater than / ≥ / Less than / ≤) + a $ amount
+//   field (Total outstanding, Total overdue, Oldest overdue).
 const FILTER_DEFS = {
-  status:        { label:"Status", options:[
+  status:        { label:"Status", kind:"categorical", options:[
                     {value:"review", display:"Needs Review"},
                     {value:"executed", display:"Executed"},
                     {value:"rejected", display:"Rejected"},
+                    {value:"failed", display:"Failed"},
                   ]},
-  escalated:     { label:"Flag", options:[
+  escalated:     { label:"Flag", kind:"categorical", options:[
                     {value:"true", display:"Flagged"},
                     {value:"false", display:"Not flagged"},
                   ]},
-  paused:        { label:"Paused", options:[
+  paused:        { label:"Paused", kind:"categorical", options:[
                     {value:"true", display:"Paused"},
                     {value:"false", display:"Not paused"},
                   ]},
-  outstanding:   { label:"Total outstanding", options:[
-                    {value:"0", display:"> $0"},
-                    {value:"10000", display:"> $10,000"},
-                    {value:"25000", display:"> $25,000"},
-                  ]},
-  overdue:       { label:"Total overdue", options:[
-                    {value:"0", display:"> $0"},
-                    {value:"10000", display:"> $10,000"},
-                    {value:"25000", display:"> $25,000"},
-                  ]},
-  oldestOverdue: { label:"Oldest overdue", options:[
-                    {value:"0", display:"> 0 days"},
-                    {value:"30", display:"> 30 days"},
-                    {value:"60", display:"> 60 days"},
-                  ]},
+  outstanding:   { label:"Total outstanding", kind:"numeric" },
+  overdue:       { label:"Total overdue", kind:"numeric" },
+  oldestOverdue: { label:"Oldest overdue", kind:"numeric", unit:"days" },
 };
+const NUMERIC_OPERATORS = [
+  { value:"eq",  display:"Equal to" },
+  { value:"gt",  display:"Greater than" },
+  { value:"gte", display:"Greater than or equal" },
+  { value:"lt",  display:"Less than" },
+  { value:"lte", display:"Less than or equal" },
+];
+function numericFieldValue(r, type){
+  if(type==="outstanding") return r.outstandingAmt||0;
+  if(type==="overdue") return r.overdueAmt||0;
+  if(type==="oldestOverdue") return r.mostOverdueDays==null ? 0 : r.mostOverdueDays;
+  return 0;
+}
+function numericDisplay(def, operator, amount){
+  const symbol = {eq:"=",gt:">",gte:"≥",lt:"<",lte:"≤"}[operator] || "";
+  const amt = def.unit==="days" ? `${amount} days` : fmtMoney(Number(amount)||0);
+  return `${symbol} ${amt}`;
+}
 function filterMatches(r, f){
-  switch(f.type){
-    case "status": return r.planStatus === f.value;
-    case "escalated": return String(!!r.escalated) === f.value;
-    case "paused": return String(!!r.paused) === f.value;
-    case "outstanding": return (r.outstandingAmt||0) > Number(f.value);
-    case "overdue": return (r.overdueAmt||0) > Number(f.value);
-    case "oldestOverdue": return (r.mostOverdueDays||0) > Number(f.value);
-    default: return true;
+  if(f.mode==="categorical") return f.values.includes(String(f.type==="status"?r.planStatus:f.type==="escalated"?!!r.escalated:!!r.paused));
+  if(f.mode==="numeric"){
+    const v = numericFieldValue(r, f.type), n = Number(f.amount);
+    switch(f.operator){
+      case "eq": return v===n;
+      case "gt": return v>n;
+      case "gte": return v>=n;
+      case "lt": return v<n;
+      case "lte": return v<=n;
+      default: return true;
+    }
   }
+  return true;
 }
 function sortValue(r, key){
   switch(key){
@@ -286,6 +300,18 @@ function sortRows(rows){
   if(!inboxSort.key) return rows;
   const mul = inboxSort.dir==="asc" ? 1 : -1;
   return [...rows].sort((a,b)=>(sortValue(a,inboxSort.key)-sortValue(b,inboxSort.key))*mul);
+}
+// Numbered pagination — first, last, current ±1, collapsing everything else behind "…".
+function pageNumbersToShow(current, total){
+  if(total<=7) return Array.from({length:total},(_,i)=>i+1);
+  const set = new Set([1,2,total-1,total,current-1,current,current+1]);
+  const nums = [...set].filter(n=>n>=1&&n<=total).sort((a,b)=>a-b);
+  const out = [];
+  for(let i=0;i<nums.length;i++){
+    if(i>0 && nums[i]-nums[i-1]>1) out.push("…");
+    out.push(nums[i]);
+  }
+  return out;
 }
 
 // Meridian is the "shows everything" scenario: a narrative across 2 distinct email threads
@@ -597,20 +623,31 @@ const SCENARIO_COBALT = {
   events: [],
   scheduled: [],
   proposed: [
+    // Boolean actions (nothing to edit, just approve/reject) — mark_pending and flag_customer
+    // below. Everything else here has editableFields: a real value the agent inferred that a
+    // reviewer might want to correct before approving.
     { kind:"mark_pending", desc:"Mark INV-5520 as pending while the remaining balance is confirmed",
       cause:{ type:"email", id:"cf_e2" } },
     { kind:"update_po", desc:"Add PO# CF-4471 to INV-5520",
+      editableFields:[{label:"PO number", value:"CF-4471"}],
       cause:{ type:"email", id:"cf_e2" } },
     // Not the dedicated update_contacts card (that branch only shows a single editable value,
     // no room for the CC + address changes too) — a distinct kind so it hits the generic card
     // and shows the full desc instead of silently dropping everything but the primary contact.
     { kind:"update_customer_info", desc:"Set primary billing contact → Marcus Yee, marcus.yee@cobaltfitness.com (keep Renee Ibarra CC'd), update billing address → 900 Harbor Blvd, Suite 220, Long Beach, CA 90802",
+      editableFields:[
+        {label:"Primary contact", value:"Marcus Yee, marcus.yee@cobaltfitness.com"},
+        {label:"CC", value:"Renee Ibarra, ap@cobaltfitness.com"},
+        {label:"Billing address", value:"900 Harbor Blvd, Suite 220, Long Beach, CA 90802"},
+      ],
       cause:{ type:"email", id:"cf_e2" } },
     { kind:"apply_cash_app", desc:"Apply the $2,000 wire (ref WIRE-88213, Jun 10) to INV-5520",
+      editableFields:[{label:"Reference", value:"WIRE-88213"},{label:"Amount", value:"$2,000.00"}],
       cause:{ type:"email", id:"cf_e2" } },
     { kind:"flag_customer", desc:"Flag customer: 3 billing-contact changes in 2 months, customer asked for extra attention on the account",
       cause:{ type:"email", id:"cf_e2" } },
     { kind:"schedule_task", desc:"Schedule a check-in in 3 weeks to confirm the account is settled",
+      editableFields:[{label:"Date", value:"Jul 3, 2026"},{label:"Prompt", value:"Confirm the account is settled"}],
       cause:{ type:"email", id:"cf_e2" } },
     { kind:"send_email", desc:"Reply to Renee Ibarra confirming all of the above, with the current contract attached", invoice:"INV-5520",
       cause:{ type:"email", id:"cf_e2" },
@@ -637,14 +674,13 @@ const SCENARIOS_BY_ID = {
 // ============================================================
 let view = "inbox";  // "inbox" | "detail" | "customer" | "billing"
 let filterOpen = false;
-let filterSubmenu = null;   // which filter type's value-list is showing in the Add-filter dropdown, if any
-let activeFilters = [{ type:"status", value:"review", label:"Status", display:"Needs Review" }]; // default: worklist opens scoped to what needs a look
-let colConfigOpen = false;
+let filterSubmenu = null;   // which filter type's value-panel is showing in the Add-filter dropdown, if any
+let activeFilters = [{ type:"status", mode:"categorical", label:"Status", values:["review"], display:"Needs Review" }]; // default: worklist opens scoped to what needs a look
+let pendingFilterOperator = {}; // per numeric filter type, the operator radio picked before/while an amount is typed
 let inboxSearchQuery = "";
 let inboxPage = 1;
 const INBOX_PAGE_SIZE = 25;
 let inboxSort = { key:"overdue", dir:"desc" }; // default: highest total overdue first, alongside the default Needs Review filter
-let visibleInboxCols = new Set(INBOX_COLUMNS.map(c=>c.key)); // all columns visible by default
 let drawerThreadId = null;       // thread shown in the right-side drawer (null = closed)
 let drawerOpenEmails = new Set(); // which emails are expanded in the drawer (Gmail-style)
 let drawerEditing = false;        // is the agent draft expanded into the editable composer in the drawer?
@@ -666,6 +702,7 @@ let attachPickerOpen = false;
 let agentEscalated = false;
 let flagPopoverOpen = false;   // small "why are you flagging this?" popover, shown only when turning the flag ON
 let agentPaused = false;
+let invSort = { key:null, dir:"asc" };  // Outstanding Invoices table — sortable Due/Amount headers
 let activityFilter = "all";     // "all" | "email" — Activity tab
 // scheduled tab state
 let editingTask = null;       // task id being edited
@@ -719,9 +756,9 @@ function navItemHTML(s, needsReview){
   const attrs = `${isParent?`data-nav-toggle="${s.id}"`:""} ${s.act?`data-nav-go="${s.act}"`:""}`;
   const badgedSub = isParent && s.subs.some(x=>x.badge);
   const dot = (needsReview>0 && (badgedSub || (!isParent && s.badge))) ? '<span class="ni-dot"></span>' : "";
-  // show the count on the parent row too when it's collapsed, so a nested badged sub (e.g.
-  // Invoicing → Collections Agent) still surfaces its review count without expanding.
-  const topBadge = (needsReview>0 && ((!isParent && s.badge) || (badgedSub && !open))) ? `<span class="nav-badge">${needsReview}</span>` : "";
+  // The count only ever shows on the actual badged row (e.g. Invoicing → Collections Agent) —
+  // not on the parent section too when it's collapsed. Expand the section to see it.
+  const topBadge = (needsReview>0 && !isParent && s.badge) ? `<span class="nav-badge">${needsReview}</span>` : "";
   let out = `<div class="nav-item${isParent?" parent":""}${open?" open":""}${active}" ${attrs} title="${esc(s.label)}">
       <span class="ni-ic">${NAV_ICON[s.icon]}${dot}</span><span class="ni-label">${esc(s.label)}</span>${topBadge}${chev}
     </div>`;
@@ -922,7 +959,7 @@ function fmtMoney(n){ return "$"+n.toLocaleString("en-US",{minimumFractionDigits
 
 // Cell renderers keyed by column — used by both the header (label) and body (per-row markup).
 function inboxCell(key, r){
-  const statusLabel = {review:"Needs Review",executed:"Executed",rejected:"Rejected"};
+  const statusLabel = {review:"Needs Review",executed:"Executed",rejected:"Rejected",failed:"Failed"};
   switch(key){
     case "customer": {
       const flagIcon = `<span style="display:inline-block;width:13px;height:13px;margin-right:6px;vertical-align:middle;opacity:${r.escalated?1:.2}">${r.escalated?ICON.flagFill:ICON.flagOut}</span>`;
@@ -952,7 +989,7 @@ function inboxCell(key, r){
 }
 
 function renderInbox(){
-  const cols = INBOX_COLUMNS.filter(c=>c.pinned || visibleInboxCols.has(c.key));
+  const cols = INBOX_COLUMNS;
   const q = inboxSearchQuery.trim().toLowerCase();
   const searched = q ? WORKLIST.filter(r=>r.customer.toLowerCase().includes(q)) : WORKLIST;
   const filteredRows = sortRows(searched.filter(r=>activeFilters.every(f=>filterMatches(r, f))));
@@ -976,38 +1013,64 @@ function renderInbox(){
     return `<th class="${c.align==="r"?"r ":""}${c.sortable?"sortable":""}${active?" sorted":""}" ${c.sortable?`data-sort-key="${c.key}"`:""}>${esc(c.label)}${c.sortable?`<span class="th-sort">${arrow}</span>`:""}</th>`;
   }).join("");
 
-  // "Add filter" — two-step: pick a dimension, then a value. Excludes Event, Agent actions,
-  // Customer, and Open invoices — those aren't things you narrow the worklist by, they're
-  // what you're triaging.
-  const filterDropdown = filterOpen ? (
-    filterSubmenu
-      ? `<div class="filter-dropdown">
-          <div class="filter-option filter-back" data-filter-back="1"><span>‹ ${esc(FILTER_DEFS[filterSubmenu].label)}</span></div>
-          ${FILTER_DEFS[filterSubmenu].options.map(o=>`<div class="filter-option" data-filter-value="${filterSubmenu}:${o.value}:${esc(o.display)}"><span>${esc(o.display)}</span></div>`).join("")}
-        </div>`
-      : `<div class="filter-dropdown">
-          ${Object.entries(FILTER_DEFS).map(([key,def])=>`<div class="filter-option" data-filter-type="${key}"><span>${esc(def.label)}</span><span class="fo-chev">›</span></div>`).join("")}
-        </div>`
-  ) : "";
+  // "Add filter" — a dimension list on the left (always visible once open) and that
+  // dimension's value-panel to its right (checkboxes for categorical, operator radios + a $
+  // amount for numeric) — both showing at once, not a step-through-and-replace flow. Excludes
+  // Event, Agent actions, Customer, and Open invoices — those aren't things you narrow the
+  // worklist by, they're what you're triaging.
+  const resetIcon = LU('<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>');
+  const filterDimsPanel = `<div class="filter-dropdown filter-dims-panel">
+    ${Object.entries(FILTER_DEFS).map(([key,def])=>`<div class="filter-option${filterSubmenu===key?" active":""}" data-filter-type="${key}"><span>${esc(def.label)}</span><span class="fo-chev">›</span></div>`).join("")}
+  </div>`;
+  const filterValuesPanel = filterSubmenu ? (()=>{
+    const key = filterSubmenu, def = FILTER_DEFS[key];
+    const existing = activeFilters.find(f=>f.type===key);
+    if(def.kind==="categorical"){
+      const selected = existing ? existing.values : [];
+      return `<div class="filter-dropdown filter-values-panel">
+        ${def.options.map(o=>`
+        <label class="filter-checkbox-row">
+          <input type="checkbox" data-filter-checkbox="${key}:${o.value}:${esc(o.display)}" ${selected.includes(o.value)?"checked":""}>
+          <span>${esc(o.display)}</span>
+        </label>`).join("")}
+        <button class="filter-reset-btn" data-filter-reset="${key}">${resetIcon}Reset</button>
+      </div>`;
+    }
+    const operator = pendingFilterOperator[key] || (existing && existing.operator) || "gte";
+    const amount = existing ? existing.amount : "";
+    return `<div class="filter-dropdown filter-values-panel filter-values-numeric">
+      <div class="fn-row">
+        <div class="fn-radios">
+          ${NUMERIC_OPERATORS.map(o=>`
+          <label class="filter-radio-row">
+            <input type="radio" name="filter-op-${key}" data-filter-radio="${key}:${o.value}" ${operator===o.value?"checked":""}>
+            <span>${esc(o.display)}</span>
+          </label>`).join("")}
+        </div>
+        <div class="fn-amount">
+          <span class="fa-prefix">$</span>
+          <input type="text" inputmode="decimal" class="filter-amount-input" id="filterAmountInput" placeholder="0.00" value="${esc(amount)}" data-filter-amount="${key}">
+          ${amount!==""?`<button class="fa-clear" data-filter-amount-clear="${key}">×</button>`:""}
+        </div>
+      </div>
+      <button class="filter-reset-btn" data-filter-reset="${key}">${resetIcon}Reset</button>
+    </div>`;
+  })() : "";
+  const filterDropdown = filterOpen ? `${filterDimsPanel}${filterValuesPanel}` : "";
 
   const chipsHtml = activeFilters.map((f,i)=>`<span class="filter-chip">${esc(f.label)} <b>${esc(f.display)}</b><span class="fc-x" data-remove-filter="${i}">×</span></span>`).join("");
 
-  const colConfigDropdown = colConfigOpen ? `<div class="filter-dropdown col-config-dropdown">
-    <div class="col-config-title">Configure columns</div>
-    ${INBOX_COLUMNS.filter(c=>!c.pinned).map(c=>`
-      <label class="col-config-item">
-        <input type="checkbox" data-toggle-col="${c.key}" ${visibleInboxCols.has(c.key)?"checked":""}>
-        <span>${esc(c.label)}</span>
-      </label>`).join("")}
-  </div>` : "";
-
   const rangeEnd = filteredRows.length ? Math.min(pageStart + INBOX_PAGE_SIZE, filteredRows.length) : 0;
+  const pageBtns = pageNumbersToShow(inboxPage, totalPages).map(n=>
+    n==="…" ? `<span class="pg-ellipsis">…</span>`
+            : `<button class="pg-num${n===inboxPage?" active":""}" data-page-goto="${n}" aria-label="Go to page ${n}">${n}</button>`
+  ).join("");
   const pagination = `<div class="pagination-row">
     <span class="pagination-count">${filteredRows.length ? `${pageStart+1}–${rangeEnd}` : "0"} of ${filteredRows.length}</span>
     <div class="pagination-controls">
-      <button class="btn-page" data-page-nav="prev" ${inboxPage<=1?"disabled":""}>‹ Prev</button>
-      <span class="pagination-of">Page ${inboxPage} of ${totalPages}</span>
-      <button class="btn-page" data-page-nav="next" ${inboxPage>=totalPages?"disabled":""}>Next ›</button>
+      <button class="btn-page-arrow" data-page-nav="prev" aria-label="Go to previous page" ${inboxPage<=1?"disabled":""}>${LU('<path d="m15 18-6-6 6-6"/>')}</button>
+      ${pageBtns}
+      <button class="btn-page-arrow" data-page-nav="next" aria-label="Go to next page" ${inboxPage>=totalPages?"disabled":""}>${LU('<path d="m9 18 6-6-6-6"/>')}</button>
     </div>
   </div>`;
 
@@ -1018,7 +1081,7 @@ function renderInbox(){
       </div>
       <div class="filter-row">
         <div style="position:relative;display:inline-block">
-          <button class="filter-btn" id="filterBtn">☰ Add filter</button>
+          <button class="filter-btn" id="filterBtn">${LU('<path d="M2 5h20"/><path d="M6 12h12"/><path d="M9 19h6"/>')}Add filter</button>
           ${filterDropdown}
         </div>
         ${chipsHtml ? `<div class="filter-chips">${chipsHtml}</div>` : ""}
@@ -1027,11 +1090,6 @@ function renderInbox(){
           <span class="is-icon">${LU('<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>')}</span>
           <input type="text" id="inboxSearchInput" placeholder="Search in results" value="${esc(inboxSearchQuery)}">
           <button class="is-clear" id="inboxSearchClear" aria-label="Clear search" tabindex="-1"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg></button>
-        </div>
-        <span class="tbl-divider" aria-hidden="true"></span>
-        <div style="position:relative;display:inline-block">
-          <button class="col-btn${colConfigOpen?" open":""}" id="colConfigBtn" aria-label="Toggle column visibility">${LU('<path d="M10 5H3"/><path d="M12 19H3"/><path d="M14 3v4"/><path d="M16 17v4"/><path d="M21 12h-9"/><path d="M21 19h-5"/><path d="M21 5h-7"/><path d="M8 10v4"/><path d="M8 12H3"/>')}<span class="icon-tip">Columns</span></button>
-          ${colConfigDropdown}
         </div>
       </div>
       <div class="inbox-table-wrap">
@@ -1479,16 +1537,10 @@ function renderDraftEditor(draft, actionIdx, opts){
   const threadLink = isThread && actionIdx !== "reply" && !opts.inDrawer
     ? `<span class="cmp-threadlink" data-open-thread="t1">View thread →</span>` : "";
 
-  // To shows just the primary recipient plus a "+N" count for everyone else on the
-  // message (remaining To's and all Cc's folded together) — no separate Cc row, and the
-  // overflow isn't individually editable here, just a passive summary (hover for who).
-  const toPrimary = pills.to[0];
-  const toOverflow = [...pills.to.slice(1), ...pills.cc];
-  const toFieldHtml = (toPrimary
-      ? `<span class="email-pill">${esc(toPrimary)}<span class="ep-rm" data-rm-pill="${actionIdx}:to:${esc(toPrimary)}">×</span></span>`
-      : "")
-    + (toOverflow.length ? `<span class="recip-more" title="${esc(toOverflow.join(", "))}">+${toOverflow.length}</span>` : "")
-    + `<input class="recip-input" placeholder="" data-pill-input="${actionIdx}:to">`;
+  // recipient pill rows — To and Cc each show their own full pill list.
+  const pillsHtml = (list, field) => list.map(e=>
+    `<span class="email-pill">${esc(e)}<span class="ep-rm" data-rm-pill="${actionIdx}:${field}:${esc(e)}">×</span></span>`
+  ).join("") + `<input class="recip-input" placeholder="" data-pill-input="${actionIdx}:${field}">`;
 
   const attachPillsHtml = [...selAttach].map(name=>
     `<span class="attach-pill-tag" onclick="window.open('#','_blank')">📎 ${esc(name.split('/').pop())} <span class="ap-rm" data-rm-attach="${actionIdx}:${esc(name)}">×</span></span>`
@@ -1507,7 +1559,8 @@ function renderDraftEditor(draft, actionIdx, opts){
 
   return `<div class="composer">
     ${threadLink}
-    <div class="cmp-field"><span class="cmp-label">To</span><div class="cmp-control">${toFieldHtml}</div></div>
+    <div class="cmp-field"><span class="cmp-label">To</span><div class="cmp-control">${pillsHtml(pills.to,"to")}</div></div>
+    <div class="cmp-field"><span class="cmp-label">Cc</span><div class="cmp-control">${pillsHtml(pills.cc,"cc")}</div></div>
     <div class="cmp-editor">
       <textarea class="cmp-body">${esc(draft.body||"")}</textarea>
     </div>
@@ -1527,19 +1580,34 @@ function renderDraftEditor(draft, actionIdx, opts){
 // ============================================================
 //  DETAIL — header
 // ============================================================
+function invSortValue(inv, key){
+  if(key==="due") return new Date(inv.due).getTime()||0;
+  if(key==="amount") return inv.amount||0;
+  return 0;
+}
+function sortInvoicesList(list){
+  if(!invSort.key) return list;
+  const mul = invSort.dir==="asc" ? 1 : -1;
+  return [...list].sort((a,b)=>(invSortValue(a,invSort.key)-invSortValue(b,invSort.key))*mul);
+}
 function renderDetailHeader(){
   const pendingCount = SCENARIO.proposed.filter((_,i)=>!actionState[i]).length;
-  const invs = SCENARIO.invoices.slice(0,5);
-  const totalOut = invs.reduce((s,i)=>s+i.amount,0);
+  const invs = sortInvoicesList(SCENARIO.invoices).slice(0,5);
   const invRows = invs.map(inv=>{
-    const od = inv.od>0 ? ` <span class="inv-od">(${inv.od}d overdue)</span>` : "";
+    const isOverdue = (inv.status||"").toLowerCase()==="overdue";
+    const od = inv.od>0 ? ` <span class="inv-od">(${inv.od} days overdue)</span>` : "";
     return `<tr>
-      <td><a>${esc(inv.num)}</a></td>
+      <td><span>${esc(inv.num)}</span></td>
       <td>${esc(inv.due)}${od}</td>
-      <td class="inv-status">${esc(inv.status||"")}</td>
+      <td><p class="inv-status${isOverdue?" overdue":""}">${esc((inv.status||"").toUpperCase())}</p></td>
       <td class="r">${fmtMoney(inv.amount)}</td>
     </tr>`;
   }).join("");
+  const sortArrow = LU('<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>');
+  const invSortTh = (key,label,align)=>{
+    const active = invSort.key===key;
+    return `<th class="${align==="r"?"r ":""}inv-sortable${active?" sorted":""}" data-inv-sort-key="${key}">${esc(label)}<span class="inv-sort-ic">${sortArrow}</span></th>`;
+  };
   return `
     <div style="padding:14px 22px 6px;display:flex;align-items:center;gap:12px">
       <span class="page-title">${esc(SCENARIO.customer)}</span>
@@ -1577,13 +1645,14 @@ function renderDetailHeader(){
       </div>
       <div class="right">
         <div class="inv-h">Outstanding Invoices</div>
-        <table class="inv">
-          <thead><tr><th>Invoice #</th><th>Due</th><th>Status</th><th class="r">Amount</th></tr></thead>
-          <tbody>
-            ${invRows}
-            <tr class="tot"><td colspan="3">Total Outstanding</td><td class="r">${fmtMoney(totalOut)}</td></tr>
-          </tbody>
-        </table>
+        <div class="inv-table-wrap">
+          <table class="inv">
+            <thead><tr><th>Invoice #</th>${invSortTh("due","Due")}<th>Status</th>${invSortTh("amount","Amount","r")}</tr></thead>
+            <tbody>
+              ${invRows}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
     <nav class="tabs">
@@ -1674,6 +1743,42 @@ function renderActionCard(a, i){
              <button class="btn btn-primary" data-app="${i}"><span class="ic">${ICON.check}</span>Approve</button>`}
       </div>
       ${contactExpanded}
+    </div>`;
+  }
+  // Anything with real field(s) the agent inferred (a PO number, a contact, a wire reference, a
+  // scheduled date/prompt...) gets an Edit toggle, same collapsed/expanded pattern as the contact
+  // card above, generalized to N fields. Actions with nothing to edit (mark_pending,
+  // flag_customer — a boolean, not a value) skip straight to the plain Approve/Reject fallback.
+  const isGenericEditable = Array.isArray(a.editableFields) && a.editableFields.length>0;
+  if(isGenericEditable){
+    const isExp = expandedCard===i && !st;
+    const curVals = editValues[i] || a.editableFields.map(f=>f.value);
+    const fieldsExpanded = isExp ? `
+      <div class="contact-edit" style="margin-top:12px">
+        ${a.editableFields.map((f,fi)=>`
+        <div class="field">
+          <label class="field-label">${esc(f.label)}</label>
+          <input class="field-input" id="gi${i}_${fi}" value="${esc(curVals[fi])}">
+        </div>`).join("")}
+        <div class="cmp-tiny">
+          <button class="btn btn-tertiary" data-canceledit="${i}">Cancel</button>
+          <button class="btn" data-savegeneric="${i}">Save</button>
+        </div>
+        <div class="draft-footer">
+          <button class="btn btn-danger" data-rej="${i}"><span class="ic">${ICON.x}</span>Reject</button>
+          <button class="btn btn-primary" data-app="${i}"><span class="ic">${ICON.check}</span>Approve</button>
+        </div>
+      </div>` : "";
+    return `<div class="card ${st?"done":""}" style="flex-direction:column;align-items:stretch">
+      <div class="se-collapsed">
+        <div class="body" style="flex:1;min-width:0"><span class="title">${esc(ACTION_TITLES[a.kind]||a.kind)}</span><span class="desc">${esc(a.desc)}</span></div>
+        ${st
+          ? verdictHtml(st)
+          : `<button class="btn btn-tertiary" data-expand="${i}">${isExp?"Close":"Edit"}</button>
+             <button class="btn btn-danger" data-rej="${i}"><span class="ic">${ICON.x}</span>Reject</button>
+             <button class="btn btn-primary" data-app="${i}"><span class="ic">${ICON.check}</span>Approve</button>`}
+      </div>
+      ${fieldsExpanded}
     </div>`;
   }
   const acts = st ? verdictHtml(st)
@@ -1917,6 +2022,13 @@ function wire(){
   p.querySelectorAll("[data-edit-email]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); openDraftEditorInDrawer(+el.dataset.editEmail); });
   p.querySelectorAll("[data-edit]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); editingCard=+el.dataset.edit; renderPanel(); });
   p.querySelectorAll("[data-save]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const i=+el.dataset.save; const inp=document.getElementById("ci"+i); if(inp) editValues[i]=inp.value; editingCard=null; renderPanel(); });
+  p.querySelectorAll("[data-savegeneric]").forEach(el=>el.onclick=(e)=>{
+    e.stopPropagation();
+    const i=+el.dataset.savegeneric;
+    const a=SCENARIO.proposed[i];
+    editValues[i]=(a.editableFields||[]).map((f,fi)=>{ const inp=document.getElementById(`gi${i}_${fi}`); return inp?inp.value:f.value; });
+    renderPanel();
+  });
   p.querySelectorAll("[data-canceledit]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); editingCard=null; renderPanel(); });
   p.querySelectorAll("[data-resume-agent]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); agentPaused=false; render(); });
   p.querySelectorAll("[data-open-thread]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); openThreadDrawer(el.dataset.openThread); });
@@ -1987,14 +2099,14 @@ function render(){
   if(view==="billing"){
     main.innerHTML = renderTopbar(TB.billing) + renderBilling();
     const cab = $("collAgentBtn");
-    if(cab) cab.onclick=()=>{ view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null; threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set(); expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false; openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; activeTab="actions"; activityFilter="all"; render(); };
+    if(cab) cab.onclick=()=>{ view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null; threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set(); expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false; openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; invSort={key:null,dir:"asc"}; activeTab="actions"; activityFilter="all"; render(); };
   } else if(view==="customer"){
     main.innerHTML = renderTopbar(TB.customer()) + renderCustomer();
     main.querySelectorAll("[data-nav-to-detail]").forEach(el=>el.onclick=()=>{
       view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null;
       threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set();
       expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false;
-      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false;
+      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; invSort={key:null,dir:"asc"};
       activeTab="actions"; activityFilter="all"; render();
     });
     $("backBtn") && ($("backBtn").onclick=()=>{ view="inbox"; render(); });
@@ -2008,43 +2120,80 @@ function render(){
       const ni=$("inboxSearchInput"); if(ni){ ni.focus(); ni.setSelectionRange(pos, pos); }
     };
     const sc=$("inboxSearchClear"); if(sc) sc.onclick=(e)=>{ e.stopPropagation(); inboxSearchQuery=""; inboxPage=1; render(); const ni=$("inboxSearchInput"); if(ni) ni.focus(); };
-    const fb=$("filterBtn"); if(fb) fb.onclick=(e)=>{ e.stopPropagation(); filterOpen=!filterOpen; filterSubmenu=null; colConfigOpen=false; render(); };
-    const ccb=$("colConfigBtn"); if(ccb) ccb.onclick=(e)=>{ e.stopPropagation(); colConfigOpen=!colConfigOpen; filterOpen=false; render(); };
+    const fb=$("filterBtn"); if(fb) fb.onclick=(e)=>{ e.stopPropagation(); filterOpen=!filterOpen; filterSubmenu=null; render(); };
     main.querySelectorAll(".filter-dropdown").forEach(el=>el.onclick=(e)=>e.stopPropagation());
     main.querySelectorAll("[data-filter-type]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); filterSubmenu=el.dataset.filterType; render(); });
-    main.querySelectorAll("[data-filter-back]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); filterSubmenu=null; render(); });
-    main.querySelectorAll("[data-filter-value]").forEach(el=>el.onclick=(e)=>{
+    main.querySelectorAll("[data-filter-checkbox]").forEach(el=>el.onchange=(e)=>{
       e.stopPropagation();
-      const [type,value,display] = el.dataset.filterValue.split(":");
-      activeFilters = activeFilters.filter(f=>f.type!==type);
-      activeFilters.push({ type, value, label:FILTER_DEFS[type].label, display });
-      filterOpen=false; filterSubmenu=null; inboxPage=1; render();
+      const [type,value,display] = el.dataset.filterCheckbox.split(":");
+      let f = activeFilters.find(x=>x.type===type);
+      if(!f){ f = { type, mode:"categorical", label:FILTER_DEFS[type].label, values:[], displays:{} }; activeFilters.push(f); }
+      f.displays = f.displays || {};
+      if(el.checked){ if(!f.values.includes(value)) f.values.push(value); f.displays[value]=display; }
+      else { f.values = f.values.filter(v=>v!==value); delete f.displays[value]; }
+      f.display = f.values.map(v=>f.displays[v]).join(", ");
+      if(!f.values.length) activeFilters = activeFilters.filter(x=>x.type!==type);
+      inboxPage=1; render();
     });
-    main.querySelectorAll("[data-remove-filter]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); activeFilters.splice(+el.dataset.removeFilter,1); inboxPage=1; render(); });
-    main.querySelectorAll("[data-toggle-col]").forEach(el=>el.onchange=()=>{
-      const k=el.dataset.toggleCol;
-      if(visibleInboxCols.has(k)) visibleInboxCols.delete(k); else visibleInboxCols.add(k);
+    main.querySelectorAll("[data-filter-radio]").forEach(el=>el.onchange=(e)=>{
+      e.stopPropagation();
+      const [type,op] = el.dataset.filterRadio.split(":");
+      pendingFilterOperator[type] = op;
+      const f = activeFilters.find(x=>x.type===type);
+      if(f){ f.operator=op; f.display = numericDisplay(FILTER_DEFS[type], op, f.amount); }
       render();
     });
+    const fai = $("filterAmountInput");
+    if(fai) fai.oninput = (e)=>{
+      e.stopPropagation();
+      const type = fai.dataset.filterAmount;
+      const raw = fai.value.trim();
+      const pos = fai.selectionStart;
+      const op = pendingFilterOperator[type] || "gte";
+      if(raw===""){ activeFilters = activeFilters.filter(x=>x.type!==type); }
+      else {
+        let f = activeFilters.find(x=>x.type===type);
+        if(!f){ f = { type, mode:"numeric", label:FILTER_DEFS[type].label, operator:op, amount:0 }; activeFilters.push(f); }
+        f.operator = op;
+        f.amount = Number(raw)||0;
+        f.display = numericDisplay(FILTER_DEFS[type], f.operator, f.amount);
+      }
+      inboxPage=1; render();
+      const ni=$("filterAmountInput"); if(ni){ ni.focus(); ni.setSelectionRange(pos,pos); }
+    };
+    main.querySelectorAll("[data-filter-amount-clear]").forEach(el=>el.onclick=(e)=>{
+      e.stopPropagation();
+      activeFilters = activeFilters.filter(x=>x.type!==el.dataset.filterAmountClear);
+      inboxPage=1; render();
+    });
+    main.querySelectorAll("[data-filter-reset]").forEach(el=>el.onclick=(e)=>{
+      e.stopPropagation();
+      const type = el.dataset.filterReset;
+      activeFilters = activeFilters.filter(x=>x.type!==type);
+      delete pendingFilterOperator[type];
+      inboxPage=1; render();
+    });
+    main.querySelectorAll("[data-remove-filter]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); activeFilters.splice(+el.dataset.removeFilter,1); inboxPage=1; render(); });
     main.querySelectorAll("[data-page-nav]").forEach(el=>el.onclick=(e)=>{
       e.stopPropagation();
       inboxPage += el.dataset.pageNav==="next" ? 1 : -1;
       render();
     });
+    main.querySelectorAll("[data-page-goto]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); inboxPage=+el.dataset.pageGoto; render(); });
     main.querySelectorAll("th[data-sort-key]").forEach(el=>el.onclick=()=>{
       const k = el.dataset.sortKey;
       inboxSort = inboxSort.key===k ? { key:k, dir: inboxSort.dir==="asc"?"desc":"asc" } : { key:k, dir:"desc" };
       inboxPage = 1;
       render();
     });
-    document.onclick=()=>{ if(filterOpen||colConfigOpen){filterOpen=false;filterSubmenu=null;colConfigOpen=false;render();} };
+    document.onclick=()=>{ if(filterOpen){filterOpen=false;filterSubmenu=null;render();} };
     main.querySelectorAll("[data-customer]").forEach(row=>row.onclick=()=>{
       const sc = SCENARIOS_BY_ID[row.dataset.customer];
       if(sc){ SCENARIO = sc.scenario; THREADS = sc.threads; }
       view="detail"; actionState = (SCENARIO.initialActionState ? {...SCENARIO.initialActionState} : {}); editingCard=null; editValues={}; expandedCard=null;
       threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set();
       expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false;
-      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false;
+      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; invSort={key:null,dir:"asc"};
       activeTab="actions"; activityFilter="all"; render();
     });
   } else {
@@ -2061,6 +2210,11 @@ function render(){
     }
     document.onclick=()=>{ if(flagPopoverOpen){ flagPopoverOpen=false; render(); } };
     $("pauseBtn").onclick=()=>{ agentPaused=!agentPaused; render(); };
+    main.querySelectorAll("th[data-inv-sort-key]").forEach(el=>el.onclick=()=>{
+      const k = el.dataset.invSortKey;
+      invSort = invSort.key===k ? { key:k, dir: invSort.dir==="asc"?"desc":"asc" } : { key:k, dir:"asc" };
+      render();
+    });
     main.querySelectorAll(".tab").forEach(b=>b.onclick=()=>{
       if(b.dataset.tab==="settings") return;
       activeTab=b.dataset.tab;
