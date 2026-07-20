@@ -1404,6 +1404,45 @@ function renderEmailCard(em, opts={}){
 }
 
 // ============================================================
+//  PAUSE AGENT — confirm modal (only shown when there's something to lose)
+// ============================================================
+// Scheduled tasks and pending actions don't survive a pause — this counts what's
+// currently at stake for the active customer so the confirm copy is accurate.
+function pausePendingCounts(){
+  const tasks = (SCENARIO.scheduled||[]).filter(s=>s.type==="agent_task" && !deletedTasks.has(s.id)).length;
+  const actions = SCENARIO.proposed.filter((_,i)=>!actionState[i]).length;
+  return { tasks, actions };
+}
+function pauseWarningText(tasks, actions){
+  const parts = [];
+  if(tasks>0) parts.push(`${tasks} scheduled task${tasks>1?"s":""}`);
+  if(actions>0) parts.push(`${actions} action${actions>1?"s":""} needing review`);
+  return `Pausing will delete ${parts.join(" and ")}. This can't be undone.`;
+}
+function openPauseWarningModal(){
+  const { tasks, actions } = pausePendingCounts();
+  $("modal").innerHTML = `<div class="scrim" id="pauseWarnBg">
+    <div class="modal">
+      <h3>Pause agent for this customer?</h3>
+      <p>${esc(pauseWarningText(tasks, actions))}</p>
+      <div class="row">
+        <button class="btn btn-tertiary" id="pauseWarnCancel">Cancel</button>
+        <button class="btn btn-danger" id="pauseWarnConfirm">Pause &amp; clear</button>
+      </div>
+    </div>
+  </div>`;
+  $("pauseWarnCancel").onclick=()=>{ $("modal").innerHTML=""; };
+  $("pauseWarnBg").onclick=(e)=>{ if(e.target.id==="pauseWarnBg") $("modal").innerHTML=""; };
+  $("pauseWarnConfirm").onclick=()=>{
+    (SCENARIO.scheduled||[]).forEach(s=>{ if(s.type==="agent_task") deletedTasks.add(s.id); });
+    SCENARIO.proposed.forEach((_,i)=>{ if(!actionState[i]) actionState[i]="paused"; });
+    agentPaused = true;
+    $("modal").innerHTML = "";
+    render();
+  };
+}
+
+// ============================================================
 //  DRAFT EDITOR
 // ============================================================
 function openComposeModal(){
@@ -1679,7 +1718,7 @@ function renderDetailHeader(){
 function verdictHtml(st, extraStyle){
   if(!st) return "";
   const cls = st==="auto" ? "ok" : st==="approved" ? "approved" : "no";
-  const label = st==="auto" ? "Auto-executed" : st==="approved" ? "✓ Approved" : "Rejected";
+  const label = st==="auto" ? "Auto-executed" : st==="approved" ? "✓ Approved" : st==="paused" ? "Cleared — agent paused" : "Rejected";
   return `<span class="verdict ${cls}"${extraStyle?` style="${extraStyle}"`:""}>${label}</span>`;
 }
 
@@ -2217,7 +2256,12 @@ function render(){
       $("flagReasonInput").focus();
     }
     document.onclick=()=>{ if(flagPopoverOpen){ flagPopoverOpen=false; render(); } };
-    $("pauseBtn").onclick=()=>{ agentPaused=!agentPaused; render(); };
+    $("pauseBtn").onclick=()=>{
+      if(agentPaused){ agentPaused=false; render(); return; }
+      const { tasks, actions } = pausePendingCounts();
+      if(tasks>0 || actions>0) openPauseWarningModal();
+      else { agentPaused=true; render(); }
+    };
     main.querySelectorAll("th[data-inv-sort-key]").forEach(el=>el.onclick=()=>{
       const k = el.dataset.invSortKey;
       invSort = invSort.key===k ? { key:k, dir: invSort.dir==="asc"?"desc":"asc" } : { key:k, dir:"asc" };
