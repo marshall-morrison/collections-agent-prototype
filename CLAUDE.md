@@ -10,6 +10,8 @@ This is the active working version handed off for the next round of design itera
 
 **Branches**: `main` is the **July descope** — a reduced-FE-lift build meant to ship sooner, with the AI-refine composer, multi-event citation + hover highlighting, and the agent-identity sparkle mark (worklist banner, animated tab indicator, Agent Summary logo) all cut to bring the build down in scope. `august` is the **full-featured snapshot** taken right before the descope — everything above is intact there. If a future ask is "bring back X," check whether `august` already has it before rebuilding from scratch.
 
+**August rebuild (this checkout)**: `august` was rebuilt from July's current tip rather than continuing to diverge from the stale pre-descope snapshot — July is now the base, plus three specific items pulled forward from the old `august` snapshot: the agent-identity sparkle mark (decisions #7, #9 — worklist banner sentence, Agent Summary logo, Actions tab badge), the AI-refine composer + formatting toolbar (decision #5), and the resizable email drawer (decision #4). Multi-event citation + hover highlighting (decision #10) was deliberately **not** pulled forward — that one's still considered wrong, not just cut for scope. Everything else — filters, columns, sorting, the Cobalt/Fairmont scenarios, the Pause-confirm modal — is July's version, unchanged. New Aug-25-PRD scope (promise-to-pay tool + entity, LLM policy block, chat interface on the detail page, follow-up email unification) is not yet built here.
+
 ## Running it
 
 ```bash

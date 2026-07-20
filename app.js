@@ -38,6 +38,18 @@ const NAV_ICON = {
   collapse:     LU('<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/>'),
 };
 
+// Four copies of the same NAV_ICON.agent glyph pointing outward from a shared center —
+// the "agent identity" mark for the worklist's status line (see .agent-voice below).
+function agentClusterIcon(extraClass){
+  const path = '<path fill="currentColor" d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/>';
+  return `<span class="av-icon${extraClass?` ${extraClass}`:""}">
+    <svg class="av-star av-n" viewBox="0 0 24 24">${path}</svg>
+    <svg class="av-star av-e" viewBox="0 0 24 24">${path}</svg>
+    <svg class="av-star av-s" viewBox="0 0 24 24">${path}</svg>
+    <svg class="av-star av-w" viewBox="0 0 24 24">${path}</svg>
+  </span>`;
+}
+
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function mdToHtml(t){ return t.trim().split(/\n\n+/).map(p=>`<p>${p.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,' ')}</p>`).join(''); }
@@ -700,6 +712,10 @@ let actionState = {};
 let editingCard = null;
 let editValues = {};
 let expandedCard = null;
+// AI draft refinement (Gmail-style "describe your change")
+let draftHistory = {};   // actionIdx -> [previous body strings]  (undo stack)
+let draftRedo = {};      // actionIdx -> [body strings]           (redo stack)
+let aiGenerating = false;
 let threadExpanded = false;
 // activity state
 let selectedEmailId = null;
@@ -997,6 +1013,7 @@ function inboxCell(key, r){
 }
 
 function renderInbox(){
+  const needsReviewCount = WORKLIST.filter(r=>r.planStatus==="review").length;
   const cols = INBOX_COLUMNS;
   const q = inboxSearchQuery.trim().toLowerCase();
   const searched = q ? WORKLIST.filter(r=>r.customer.toLowerCase().includes(q)) : WORKLIST;
@@ -1086,6 +1103,12 @@ function renderInbox(){
     <div class="inbox-wrap">
       <div class="inbox-head">
         <h1>Collections Agent</h1>
+      </div>
+      <div class="agent-voice">
+        ${agentClusterIcon()}
+        <span class="av-text">${needsReviewCount>0
+          ? `<strong>${needsReviewCount}</strong> action${needsReviewCount===1?"":"s"} ready for your review`
+          : `Nothing needs your review right now`}</span>
       </div>
       <div class="filter-row">
         <div style="position:relative;display:inline-block">
@@ -1237,6 +1260,34 @@ function renderDeliveryDetails(em){
     </div>
   </div>`;
 }
+// Drawer resize — set up once, via delegation, so it survives every re-render of #emailDrawer's
+// innerHTML (the handle itself is re-inserted into that markup on each render).
+(function setupDrawerResize(){
+  let dragging = false;
+  document.addEventListener("mousedown", (e)=>{
+    const handle = e.target.closest && e.target.closest(".drawer-resize-handle");
+    if(!handle) return;
+    dragging = true;
+    handle.classList.add("dragging");
+    const drawer = $("emailDrawer"); if(drawer) drawer.classList.add("resizing");
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", (e)=>{
+    if(!dragging) return;
+    const drawer = $("emailDrawer"); if(!drawer) return;
+    const newWidth = Math.min(Math.max(window.innerWidth - e.clientX, 420), Math.round(window.innerWidth*0.94));
+    drawer.style.width = newWidth + "px";
+  });
+  document.addEventListener("mouseup", ()=>{
+    if(!dragging) return;
+    dragging = false;
+    document.body.style.userSelect = "";
+    document.querySelectorAll(".drawer-resize-handle.dragging").forEach(h=>h.classList.remove("dragging"));
+    const drawer = $("emailDrawer"); if(drawer) drawer.classList.remove("resizing");
+  });
+})();
+
 function renderEmailDrawer(){
   const drawer = $("emailDrawer"), scrim = $("emailScrim");
   if(!drawer) return;
@@ -1297,6 +1348,7 @@ function renderEmailDrawer(){
   }
 
   drawer.innerHTML = `
+    <div class="drawer-resize-handle" title="Drag to resize"></div>
     <div class="ed-head">
       <span class="ed-subject">${esc(thread.subject)} <span class="ed-count">${sorted.length} message${sorted.length>1?"s":""}</span></span>
       <button class="ed-close" id="emailDrawerClose" title="Close">×</button>
@@ -1319,6 +1371,12 @@ function wireDrawerComposer(drawer, idx){
   const rr = ()=>renderEmailDrawer();
   drawer.querySelectorAll("[data-cancel-draft]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); drawerEditing=false; rr(); });
   drawer.querySelectorAll("[data-save-draft]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); drawerEditing=false; rr(); });
+  drawer.querySelectorAll("[data-ai-refine]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const [i,type]=el.dataset.aiRefine.split(":"); const inp=drawer.querySelector(`[data-ai-input="${i}"]`); if(inp) inp.value=""; aiRefineDraft(i, type); });
+  drawer.querySelectorAll("[data-ai-input]").forEach(el=>el.onkeydown=(e)=>{ if(e.key==="Enter"){ e.preventDefault(); e.stopPropagation(); if(!el.value.trim()) return; const i=el.dataset.aiInput; el.value=""; aiRefineDraft(i, null); } });
+  drawer.querySelectorAll("[data-ai-submit]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const i=el.dataset.aiSubmit; const inp=drawer.querySelector(`[data-ai-input="${i}"]`); if(!inp||!inp.value.trim()) return; inp.value=""; aiRefineDraft(i, null); });
+  drawer.querySelectorAll("[data-ai-focus]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); drawer.querySelector(`[data-ai-input="${el.dataset.aiFocus}"]`)?.focus(); });
+  drawer.querySelectorAll("[data-ai-undo]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); aiUndoRedo(el.dataset.aiUndo, false); });
+  drawer.querySelectorAll("[data-ai-redo]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); aiUndoRedo(el.dataset.aiRedo, true); });
   drawer.querySelectorAll("[data-app]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); actionState[+el.dataset.app]="approved"; expandedCard=null; closeEmailDrawer(); activeTab="actions"; render(); });
   drawer.querySelectorAll("[data-rej]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); actionState[+el.dataset.rej]="rejected"; expandedCard=null; closeEmailDrawer(); activeTab="actions"; render(); });
   drawer.querySelectorAll("[data-pill-input]").forEach(el=>el.onkeydown=(e)=>{
@@ -1563,6 +1621,74 @@ function openEmailHeaderModal(emailId, triggerEl){
   setTimeout(()=>document.addEventListener("click", window._hdrClose), 0);
 }
 
+// ----- AI draft refinement (mock) -----
+// Canned rewrites for the Meridian W-9 reply; a custom instruction falls back to "polish".
+const AI_VARIANTS = {
+  polish:    "Hi Dana,\n\nThanks for flagging both. The signed W-9 is attached, and I've updated the primary billing contact to ap@meridiangroup.com as requested.\n\nPlease let me know if anything else is needed.\n\nBest,\nPriya Sharma\nGeneral Catalyst",
+  serious:   "Dana,\n\nBefore we can move forward, we need the signed W-9 and confirmation of the billing contact. This has already delayed payment, so please send both today.\n\nThank you,\nPriya Sharma\nGeneral Catalyst",
+  friendly:  "Hi Dana,\n\nThanks so much for flagging these! I've attached the signed W-9 for you, and I've gone ahead and updated your billing contact to ap@meridiangroup.com.\n\nJust give me a shout if there's anything else at all I can help with; I'm happy to sort it out.\n\nWarmly,\nPriya",
+  shorter:   "Hi Dana,\n\nSigned W-9 attached, and I've updated the billing contact to ap@meridiangroup.com.\n\nBest,\nPriya",
+};
+function mockRefine(current, type){
+  return (type && AI_VARIANTS[type]) ? AI_VARIANTS[type] : AI_VARIANTS.polish;
+}
+function setDraftBody(actionIdx, body){
+  const a = SCENARIO.proposed[actionIdx];
+  if(a && a.draft) a.draft.body = body;
+}
+function updateAiHistoryButtons(actionIdx){
+  const u = document.querySelector(`[data-ai-undo="${actionIdx}"]`);
+  const r = document.querySelector(`[data-ai-redo="${actionIdx}"]`);
+  if(u) u.disabled = !((draftHistory[actionIdx]||[]).length);
+  if(r) r.disabled = !((draftRedo[actionIdx]||[]).length);
+}
+function typeInto(ta, text, done){
+  ta.value = "";
+  let i = 0;
+  const step = ()=>{
+    if(i >= text.length){ done && done(); return; }
+    i += 2 + Math.floor(Math.random()*3);    // 2–4 chars per tick
+    ta.value = text.slice(0, i);
+    ta.scrollTop = ta.scrollHeight;
+    setTimeout(step, 13);
+  };
+  step();
+}
+function aiRefineDraft(actionIdx, type){
+  if(aiGenerating) return;
+  const ta = document.querySelector(".cmp-body"); if(!ta) return;
+  const editor = document.querySelector(".cmp-editor");
+  const bar = document.querySelector(".cmp-ai");
+  const current = ta.value;
+  const next = mockRefine(current, type);
+  (draftHistory[actionIdx] = draftHistory[actionIdx]||[]).push(current);
+  draftRedo[actionIdx] = [];
+  aiGenerating = true;
+  ta.readOnly = true;
+  editor && editor.classList.add("generating");
+  bar && bar.classList.add("busy");
+  typeInto(ta, next, ()=>{
+    aiGenerating = false;
+    ta.readOnly = false;
+    editor && editor.classList.remove("generating");
+    bar && bar.classList.remove("busy");
+    setDraftBody(actionIdx, next);
+    updateAiHistoryButtons(actionIdx);
+  });
+}
+function aiUndoRedo(actionIdx, isRedo){
+  if(aiGenerating) return;
+  const from = isRedo ? draftRedo[actionIdx] : draftHistory[actionIdx];
+  if(!from || !from.length) return;
+  const ta = document.querySelector(".cmp-body"); if(!ta) return;
+  const to = isRedo ? (draftHistory[actionIdx]=draftHistory[actionIdx]||[]) : (draftRedo[actionIdx]=draftRedo[actionIdx]||[]);
+  to.push(ta.value);
+  const val = from.pop();
+  ta.value = val;
+  setDraftBody(actionIdx, val);
+  updateAiHistoryButtons(actionIdx);
+}
+
 function renderDraftEditor(draft, actionIdx, opts){
   opts = opts || {};
   // init recipient pills from draft
@@ -1604,12 +1730,42 @@ function renderDraftEditor(draft, actionIdx, opts){
     : `<button class="btn btn-danger" data-rej="${actionIdx}"><span class="ic">${ICON.x}</span>Reject</button>
        <button class="btn btn-primary" data-app="${actionIdx}"><span class="ic">${ICON.check}</span>Approve &amp; send</button>`;
 
+  const tool = (p)=>`<button class="cmp-tool" tabindex="-1">${LU(p)}</button>`;
+  const toolbar = [
+    '<path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/>',
+    '<line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/>',
+    '<path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" x2="20" y1="12" y2="12"/>',
+    '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+    '<line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/>',
+  ].map(tool).join("");
+
+  // Gmail-style AI refinement bar: describe-a-change input + quick refine tools + undo/redo
+  const aiTool = (action,tip,paths)=>`<button class="cmp-ai-tool" data-ai-refine="${actionIdx}:${action}" data-tip="${tip}">${LU(paths)}</button>`;
+  const histLen = (draftHistory[actionIdx]||[]).length;
+  const redoLen = (draftRedo[actionIdx]||[]).length;
+  const aiBar = `<div class="cmp-ai" data-ai-bar="${actionIdx}">
+    <span class="cmp-ai-pencil" data-ai-focus="${actionIdx}">${LU('<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>')}</span>
+    <input class="cmp-ai-input" placeholder="Describe your change" data-ai-input="${actionIdx}">
+    <button class="cmp-ai-submit" data-ai-submit="${actionIdx}" data-tip="Submit" aria-label="Submit change">${LU('<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>')}</button>
+    <div class="cmp-ai-actions">
+      ${aiTool("polish","Polish",'<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>')}
+      ${aiTool("serious","Serious",'<circle cx="12" cy="12" r="10"/><line x1="8" x2="16" y1="15" y2="15"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>')}
+      ${aiTool("friendly","Friendly",'<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/>')}
+      ${aiTool("shorter","Shorter",'<path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/>')}
+      <span class="cmp-ai-div"></span>
+      <button class="cmp-ai-tool" data-ai-undo="${actionIdx}" data-tip="Undo" ${histLen?"":"disabled"}>${LU('<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>')}</button>
+      <button class="cmp-ai-tool" data-ai-redo="${actionIdx}" data-tip="Redo" ${redoLen?"":"disabled"}>${LU('<path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"/>')}</button>
+    </div>
+  </div>`;
+
   return `<div class="composer">
     ${threadLink}
     <div class="cmp-field"><span class="cmp-label">To</span><div class="cmp-control">${pillsHtml(pills.to,"to")}</div></div>
     <div class="cmp-field"><span class="cmp-label">Cc</span><div class="cmp-control">${pillsHtml(pills.cc,"cc")}</div></div>
     <div class="cmp-editor">
+      <div class="cmp-toolbar">${toolbar}</div>
       <textarea class="cmp-body">${esc(draft.body||"")}</textarea>
+      ${aiBar}
     </div>
     <div class="cmp-tiny">
       <button class="btn btn-tertiary" data-cancel-draft="${actionIdx}">Cancel</button>
@@ -1686,7 +1842,7 @@ function renderDetailHeader(){
     <section class="finger">
       <div class="left">
         <div class="agent-summary">
-          <div class="as-label">Agent Summary</div>
+          <div class="as-label">${agentClusterIcon("static")}Agent Summary</div>
           <div class="as-body">${renderAgentSummary(SCENARIO)}</div>
         </div>
       </div>
@@ -1703,7 +1859,7 @@ function renderDetailHeader(){
       </div>
     </section>
     <nav class="tabs">
-      <button class="tab ${activeTab==="actions"?"active":""}" data-tab="actions">Actions${pendingCount>0?`<span class="tab-dot"></span>`:""}</button>
+      <button class="tab ${activeTab==="actions"?"active":""}" data-tab="actions">Actions${pendingCount>0?agentClusterIcon("tiny"):""}</button>
       <button class="tab ${activeTab==="activity"?"active":""}" data-tab="activity">Activity</button>
       <button class="tab ${activeTab==="scheduled"?"active":""}" data-tab="scheduled">Scheduled</button>
       <span class="tab-underline" aria-hidden="true"></span>
@@ -2105,6 +2261,12 @@ function wire(){
   p.querySelectorAll("[data-delete-task]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); deletedTasks.add(el.dataset.deleteTask); editingTask=null; renderPanel(); });
   p.querySelectorAll("[data-cancel-draft]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); expandedCard=null; renderPanel(); });
   p.querySelectorAll("[data-save-draft]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); expandedCard=null; renderPanel(); });
+  p.querySelectorAll("[data-ai-refine]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const [idx,type]=el.dataset.aiRefine.split(":"); const inp=p.querySelector(`[data-ai-input="${idx}"]`); if(inp) inp.value=""; aiRefineDraft(idx, type); });
+  p.querySelectorAll("[data-ai-input]").forEach(el=>el.onkeydown=(e)=>{ if(e.key==="Enter"){ e.preventDefault(); e.stopPropagation(); if(!el.value.trim()) return; const idx=el.dataset.aiInput; el.value=""; aiRefineDraft(idx, null); } });
+  p.querySelectorAll("[data-ai-submit]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const idx=el.dataset.aiSubmit; const inp=p.querySelector(`[data-ai-input="${idx}"]`); if(!inp||!inp.value.trim()) return; inp.value=""; aiRefineDraft(idx, null); });
+  p.querySelectorAll("[data-ai-focus]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); p.querySelector(`[data-ai-input="${el.dataset.aiFocus}"]`)?.focus(); });
+  p.querySelectorAll("[data-ai-undo]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); aiUndoRedo(el.dataset.aiUndo, false); });
+  p.querySelectorAll("[data-ai-redo]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); aiUndoRedo(el.dataset.aiRedo, true); });
   p.querySelectorAll("[data-open-picker]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); attachPickerOpen=attachPickerOpen===el.dataset.openPicker?false:el.dataset.openPicker; renderPanel(); });
   p.querySelectorAll("[data-pick-attach]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const [idx,name]=el.dataset.pickAttach.split(":"); if(!selectedAttachments[idx]) selectedAttachments[idx]=new Set(); selectedAttachments[idx].add(name); attachPickerOpen=false; renderPanel(); });
   p.querySelectorAll("[data-rm-attach]").forEach(el=>el.onclick=(e)=>{ e.stopPropagation(); const [idx,name]=el.dataset.rmAttach.split(":"); if(selectedAttachments[idx]) selectedAttachments[idx].delete(name); renderPanel(); });
@@ -2146,14 +2308,14 @@ function render(){
   if(view==="billing"){
     main.innerHTML = renderTopbar(TB.billing) + renderBilling();
     const cab = $("collAgentBtn");
-    if(cab) cab.onclick=()=>{ view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null; threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set(); expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false; openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; invSort={key:null,dir:"asc"}; activeTab="actions"; activityFilter="all"; render(); };
+    if(cab) cab.onclick=()=>{ view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null; threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set(); expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false; openNewEvents=new Set(); recipientPills={}; draftHistory={}; draftRedo={}; aiGenerating=false; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; invSort={key:null,dir:"asc"}; activeTab="actions"; activityFilter="all"; render(); };
   } else if(view==="customer"){
     main.innerHTML = renderTopbar(TB.customer()) + renderCustomer();
     main.querySelectorAll("[data-nav-to-detail]").forEach(el=>el.onclick=()=>{
       view="detail"; actionState={}; editingCard=null; editValues={}; expandedCard=null;
       threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set();
       expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false;
-      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; invSort={key:null,dir:"asc"};
+      openNewEvents=new Set(); recipientPills={}; draftHistory={}; draftRedo={}; aiGenerating=false; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; invSort={key:null,dir:"asc"};
       activeTab="actions"; activityFilter="all"; render();
     });
     $("backBtn") && ($("backBtn").onclick=()=>{ view="inbox"; render(); });
@@ -2240,7 +2402,7 @@ function render(){
       view="detail"; actionState = (SCENARIO.initialActionState ? {...SCENARIO.initialActionState} : {}); editingCard=null; editValues={}; expandedCard=null;
       threadExpanded=false; selectedEmailId=null; threadOpenEmails=new Set();
       expandedHeaders=new Set(); selectedAttachments={}; showBcc=false; attachPickerOpen=false;
-      openNewEvents=new Set(); recipientPills={}; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; invSort={key:null,dir:"asc"};
+      openNewEvents=new Set(); recipientPills={}; draftHistory={}; draftRedo={}; aiGenerating=false; drawerThreadId=null; drawerEditing=false; drawerEditActionIdx=null; agentEscalated=false; flagPopoverOpen=false; agentPaused=false; invSort={key:null,dir:"asc"};
       activeTab="actions"; activityFilter="all"; render();
     });
   } else {
